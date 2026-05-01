@@ -116,13 +116,6 @@ EMAIL_HOST_PASSWORD = os.getenv("EMAIL_HOST_PASSWORD")
 #ESTA LÍNEA (Le dice a Django cuál es el remitente por defecto)
 DEFAULT_FROM_EMAIL = EMAIL_HOST_USER
 
-# Email (Gmail SMTP)
-EMAIL_BACKEND = "django.core.mail.backends.smtp.EmailBackend"
-EMAIL_HOST = "smtp.gmail.com"
-# ... resto de tu config ...
-EMAIL_HOST_USER = os.getenv("EMAIL_HOST_USER")
-EMAIL_HOST_PASSWORD = os.getenv("EMAIL_HOST_PASSWORD")
-DEFAULT_FROM_EMAIL = EMAIL_HOST_USER 
 
 # --- TEMPORALMENTE PARA PROBAR ---
 print(f"DEBUG: El correo cargado es: {EMAIL_HOST_USER}")
