@@ -15,7 +15,7 @@ class Migration(migrations.Migration):
     operations = [
         BtreeGistExtension(),
         
-        # ✅ Crear el tipo ANTES del modelo
+        # Crear el tipo ANTES del modelo
         migrations.RunSQL(
             sql="CREATE TYPE timerange AS RANGE (subtype = time);",
             reverse_sql="DROP TYPE timerange;",
