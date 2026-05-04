@@ -1,4 +1,5 @@
 from django.core.exceptions import ValidationError
+from django.db import IntegrityError
 
 from .models import Sala
 
@@ -13,13 +14,16 @@ def crear_sala(codigo: str, nombre: str, capacidad: int) -> Sala:
     if not nombre:
         raise ValidationError("El nombre de la sala no puede estar vacío.")
 
-    if capacidad <= 0:
-        raise ValidationError("La capacidad debe ser mayor a cero.")
+    if not isinstance(capacidad, int) or isinstance(capacidad, bool) or capacidad <= 0:
+        raise ValidationError("La capacidad debe ser un entero mayor a cero.")
 
     if Sala.objects.filter(codigo=codigo).exists():
         raise ValidationError(f"Ya existe una sala con el código '{codigo}'.")
 
-    sala = Sala.objects.create(codigo=codigo, nombre=nombre, capacidad=capacidad)
+    try:
+        sala = Sala.objects.create(codigo=codigo, nombre=nombre, capacidad=capacidad)
+    except IntegrityError:
+        raise ValidationError(f"Ya existe una sala con el código '{codigo}'.")
     return sala
 
 
@@ -49,11 +53,14 @@ def actualizar_sala(id_sala: int, codigo: str = None, nombre: str = None, capaci
         sala.nombre = nombre
 
     if capacidad is not None:
-        if capacidad <= 0:
-            raise ValidationError("La capacidad debe ser mayor a cero.")
+        if not isinstance(capacidad, int) or isinstance(capacidad, bool) or capacidad <= 0:
+            raise ValidationError("La capacidad debe ser un entero mayor a cero.")
         sala.capacidad = capacidad
 
-    sala.save()
+    try:
+        sala.save()
+    except IntegrityError:
+        raise ValidationError(f"Ya existe otra sala con el código '{sala.codigo}'.")
     return sala
 
 

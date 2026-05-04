@@ -1,4 +1,5 @@
 from django.db import models
+from django.core.exceptions import ValidationError
 from django.contrib.postgres.constraints import ExclusionConstraint
 from django.contrib.postgres.fields import RangeOperators
 from django.db.models import Func
@@ -37,6 +38,16 @@ class Horario(models.Model):
                 ],
             ),
         ]
+
+    def clean(self):
+        if self.hora_inicio is not None and self.hora_fin is not None:
+            if self.hora_fin <= self.hora_inicio:
+                raise ValidationError("La hora de fin debe ser posterior a la hora de inicio.")
+
+    def save(self, *args, validate=True, **kwargs):
+        if validate:
+            self.full_clean()
+        super().save(*args, **kwargs)
 
     def __str__(self):
         return f"{self.get_dia_semana_display()}: {self.hora_inicio} - {self.hora_fin} ({self.sala})"
