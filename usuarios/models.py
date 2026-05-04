@@ -20,3 +20,7 @@ class Usuario(AbstractUser):
 
     def __str__(self):
         return f"{self.get_full_name()} ({self.rol})"
+
+    class Meta:
+        verbose_name = 'Usuario'
+        verbose_name_plural = 'Usuarios'

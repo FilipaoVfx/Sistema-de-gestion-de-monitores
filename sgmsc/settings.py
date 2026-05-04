@@ -47,6 +47,7 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
+    'django.contrib.postgres',
 ]
 
 AUTH_USER_MODEL = 'usuarios.Usuario'
@@ -91,7 +92,7 @@ DATABASES = {
         'USER': config('DB_USER'),
         'PASSWORD': config('DB_PASSWORD'),
         'HOST': config('DB_HOST'),
-        'PORT': config('DB_PORT'),
+        'PORT': config('DB_PORT'), 
     }
 }
 
@@ -122,7 +123,6 @@ print(f"DEBUG: El correo cargado es: {EMAIL_HOST_USER}")
 if EMAIL_HOST_USER is None:
     print("ERROR: No se encontró el archivo .env o las variables están vacías.")
 # --------------------------------------------
-
 
 # Password validation
 # https://docs.djangoproject.com/en/6.0/ref/settings/#auth-password-validators
