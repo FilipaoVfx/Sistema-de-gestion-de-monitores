@@ -1,6 +1,6 @@
 import json
 
-from django.core.exceptions import ValidationError
+from django.core.exceptions import ObjectDoesNotExist, ValidationError
 from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
@@ -97,5 +97,7 @@ def sala_detalle(request, id_sala):
         try:
             services.eliminar_sala(id_sala)
             return JsonResponse({"mensaje": "Sala eliminada correctamente."})
+        except ObjectDoesNotExist:
+            return JsonResponse({"error": "Sala no encontrada."}, status=404)
         except Exception as e:
-            return JsonResponse({"error": str(e)}, status=400)
+            return JsonResponse({"error": str(e)}, status=500)
