@@ -39,6 +39,7 @@ INSTALLED_APPS = [
     'usuarios',
     'salas',
     'horarios',
+    'semestres',
     'asignaciones',
     'cambios',
     'django.contrib.admin',
