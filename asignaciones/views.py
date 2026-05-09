@@ -1,8 +1,7 @@
-from datetime import datetime, time
+from datetime import time
 
 from django.contrib import messages
 from django.core.exceptions import ValidationError
-from django.db import IntegrityError, transaction
 from django.shortcuts import redirect, render
 from django.views.decorators.http import require_http_methods
 
@@ -14,14 +13,21 @@ from usuarios.views import admin_required
 
 from .forms import CrearAsignacionesForm
 from .models import Asignacion
+from .services import crear_asignaciones
 
 
 def _fmt_hora(hora) -> str:
 	return hora.strftime("%H:%M")
 
 
-def _parse_hora_str(value: str) -> time:
-	return datetime.strptime(value, "%H:%M").time()
+def _validation_error_to_text(exc: ValidationError) -> str:
+	# Normaliza ValidationError (message_dict / messages) a un texto para mostrar.
+	if hasattr(exc, "message_dict") and exc.message_dict:
+		msgs: list[str] = []
+		for _field, field_msgs in exc.message_dict.items():
+			msgs.extend([str(m) for m in field_msgs])
+		return " ".join(m for m in msgs if m)
+	return " ".join(exc.messages) if getattr(exc, "messages", None) else str(exc)
 
 
 @admin_required
@@ -64,119 +70,21 @@ def crear_asignacion_view(request):
 			semestre = form.cleaned_data["semestre"]
 			sala_id = form.cleaned_data["sala_id"]
 			selecciones = form.cleaned_data["horarios"]
-
-			existing_ids: list[int] = []
-			nuevos: list[tuple[int, time, time]] = []
-			for token in selecciones:
-				if token.startswith("h:"):
-					existing_ids.append(int(token[2:]))
-					continue
-				# n:<dia>|<HH:MM>|<HH:MM>
-				rest = token[2:]
-				dia_str, inicio_str, fin_str = rest.split("|")
-				nuevos.append(
-					(int(dia_str), _parse_hora_str(inicio_str), _parse_hora_str(fin_str))
-				)
-
-			horarios_existentes = list(
-				Horario.objects.filter(
-					id_horario__in=existing_ids,
+			try:
+				creadas = crear_asignaciones(
+					monitor=monitor,
+					semestre=semestre,
 					sala_id=sala_id,
+					seleccion_tokens=selecciones,
 				)
-			)
-			if len(horarios_existentes) != len(set(existing_ids)):
-				form.add_error(None, "Hay bloques seleccionados que no pertenecen a la sala escogida.")
+			except ValidationError as exc:
+				form.add_error(None, _validation_error_to_text(exc) or str(exc))
 			else:
-				horarios_creados: list[Horario] = []
-				for dia_semana, hora_inicio, hora_fin in nuevos:
-					existing = Horario.objects.filter(
-						sala_id=sala_id,
-						dia_semana=dia_semana,
-						hora_inicio=hora_inicio,
-						hora_fin=hora_fin,
-					).first()
-					if existing is not None:
-						horarios_creados.append(existing)
-						continue
-
-					overlap = Horario.objects.filter(
-						sala_id=sala_id,
-						dia_semana=dia_semana,
-						hora_inicio__lt=hora_fin,
-						hora_fin__gt=hora_inicio,
-					).exists()
-					if overlap:
-						form.add_error(
-							None,
-							"Hay un bloque seleccionado que se cruza con un horario ya existente en la sala.",
-						)
-						break
-
-					try:
-						horarios_creados.append(
-							Horario.objects.create(
-								sala_id=sala_id,
-								dia_semana=dia_semana,
-								hora_inicio=hora_inicio,
-								hora_fin=hora_fin,
-							)
-						)
-					except IntegrityError:
-						form.add_error(
-							None,
-							"No se pudieron crear algunos horarios por conflicto. Recarga la grilla y reintenta.",
-						)
-						break
-					except ValidationError as exc:
-						form.add_error(None, "; ".join(exc.messages) if exc.messages else str(exc))
-						break
-
-				if not form.errors:
-					horarios_final = {h.id_horario: h for h in (horarios_existentes + horarios_creados)}
-					horario_ids = list(horarios_final.keys())
-
-					ocupados = set(
-						Asignacion.objects.filter(
-							horario_id__in=horario_ids,
-							semestre=semestre,
-						).values_list("horario_id", flat=True)
-					)
-					if ocupados:
-						form.add_error(
-							None,
-							"Algunos bloques ya están ocupados para ese periodo. Recarga la grilla y vuelve a intentar.",
-						)
-					else:
-						nuevas = [
-							Asignacion(monitor=monitor, horario=horarios_final[hid], semestre=semestre)
-							for hid in horario_ids
-						]
-
-						errores = []
-						for asignacion in nuevas:
-							try:
-								asignacion.full_clean()
-							except ValidationError as exc:
-								errores.append("; ".join(exc.messages) if exc.messages else str(exc))
-
-						if errores:
-							form.add_error(None, " ".join(errores))
-						else:
-							try:
-								with transaction.atomic():
-									for asignacion in nuevas:
-										asignacion.save(validate=False)
-							except IntegrityError:
-								form.add_error(
-									None,
-									"No se pudieron guardar las asignaciones (posible conflicto). Recarga la grilla y reintenta.",
-								)
-							else:
-								messages.success(
-									request,
-									f"Asignaciones creadas correctamente: {len(nuevas)}.",
-								)
-								return redirect("admin_dashboard")
+				messages.success(
+					request,
+					f"Asignaciones creadas correctamente: {creadas}.",
+				)
+				return redirect("admin_dashboard")
 	else:
 		initial = {}
 		if selected_monitor_email:
