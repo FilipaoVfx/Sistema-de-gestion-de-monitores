@@ -115,6 +115,7 @@ EMAIL_USE_TLS = True
 EMAIL_USE_SSL = False
 EMAIL_HOST_USER = os.getenv("EMAIL_HOST_USER")
 EMAIL_HOST_PASSWORD = os.getenv("EMAIL_HOST_PASSWORD")
+EMAIL_JEFE_DEPARTAMENTO = os.getenv("EMAIL_JEFE_DEPARTAMENTO")
 
 #ESTA LÍNEA (Le dice a Django cuál es el remitente por defecto)
 DEFAULT_FROM_EMAIL = EMAIL_HOST_USER
@@ -161,3 +162,6 @@ USE_TZ = True
 # https://docs.djangoproject.com/en/6.0/howto/static-files/
 
 STATIC_URL = 'static/'
+
+MEDIA_URL = '/media/'
+MEDIA_ROOT = BASE_DIR / 'media'

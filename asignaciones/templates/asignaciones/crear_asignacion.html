@@ -1,13 +1,5 @@
 {% extends 'base.html' %}
 
-{#
-  crear_asignacion.html — Interfaz de creación de asignaciones.
-  Requisitos:
-  - Autocomplete para Sala (código/nombre) y captura de id_sala (no se persiste en Asignacion, se usa para filtrar Horarios).
-  - Grilla semanal clickeable para seleccionar uno o varios Horarios.
-  - Selector de periodo académico (Semestre), con el periodo activo por defecto.
-#}
-
 {% block title %}Crear Asignación | SGM SC{% endblock %}
 
 {% block extra_head %}
@@ -33,8 +25,10 @@
 {% endblock %}
 
 {% block content %}
-  <div class="row justify-content-center">
-    <div class="col-12">
+  {% include 'usuarios/partials/chat_panel.html' %}
+  
+  <div class="d-flex justify-content-center py-5">
+    <div style="max-width: 1200px; width: 100%; padding: 0 20px;">
       <div class="card shadow-sm border-0">
         <div class="card-body p-4 p-md-5">
           <div class="d-flex flex-column flex-sm-row align-items-sm-start justify-content-between gap-3 mb-4">
@@ -236,7 +230,7 @@
         selectedInput.value = Array.from(selected).join(",");
       };
 
-      // NUEVO: Función para limpiar completamente las selecciones
+      // Función para limpiar completamente las selecciones
       const clearSelections = () => {
         selected.clear();
         syncSelectedInput();
@@ -245,7 +239,7 @@
         });
       };
 
-      // NUEVO: Si el usuario cambia o borra el monitor, limpiamos los horarios
+      // Si el usuario cambia o borra el monitor, limpiamos los horarios
       monitorInput?.addEventListener("input", () => {
         clearSelections();
       });

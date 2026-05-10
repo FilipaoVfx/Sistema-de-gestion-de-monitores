@@ -7,13 +7,13 @@ from AI_implementation.ai_orchestrator import get_ai_response
 async def simular_chat():
     print("="*50)
     print("🤖 SIMULADOR DE CHAT - ADMIN DE MONITORES")
-    print("Conectado a PostgreSQL vía MCP y a Qwen vía Ollama Cloud")
+    print("Conectado a PostgreSQL vía MCP y a gemini flash 2.5")
     print("Escribe 'salir' para terminar la simulación.")
     print("="*50)
 
     while True:
         # 1. Leer la pregunta del usuario
-        pregunta = input("\n🧑‍💻 Admin: ")
+        pregunta = input("\n🧑‍💻 Admin:  ")
         
         # 2. Condición para salir del bucle
         if pregunta.lower() in ['salir', 'exit', 'quit']:

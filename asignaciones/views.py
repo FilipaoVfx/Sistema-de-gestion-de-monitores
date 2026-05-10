@@ -210,5 +210,6 @@ def crear_asignacion_view(request):
 		"grid_rows": grid_rows,
 		"selected_keys": selected_keys_set,
 		"sala_display": sala_display,
+		"admin_username": request.user.username,
 	}
 	return render(request, "asignaciones/crear_asignacion.html", context)
