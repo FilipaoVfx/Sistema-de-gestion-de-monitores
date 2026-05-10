@@ -5,3 +5,5 @@ python-decouple==3.8
 sqlparse==0.5.5
 tzdata==2026.1
 python-dotenv
+openai==2.36.0
+mcp==1.27.1
