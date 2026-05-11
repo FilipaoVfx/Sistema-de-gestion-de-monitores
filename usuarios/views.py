@@ -1,4 +1,5 @@
 from functools import wraps
+import json
 
 from django.contrib import messages
 from django.contrib.auth import authenticate, login
@@ -6,13 +7,16 @@ from django.contrib.auth.decorators import login_required
 from django.conf import settings
 from django.core.mail import send_mail
 from django.core.exceptions import PermissionDenied
-from django.http import HttpResponse
+from django.http import HttpResponse, JsonResponse
 from django.shortcuts import redirect, render
 from django.utils.crypto import get_random_string
 from django.views.decorators.http import require_http_methods
+from django.views.decorators.csrf import csrf_protect
+from asgiref.sync import async_to_sync
 
 from .forms import MonitorCreationForm
 from .models import Usuario
+from AI_implementation.ai_orchestrator import get_ai_response
 
 
 def role_required(expected_role):
@@ -104,9 +108,56 @@ def crear_monitor_view(request):
 
 @admin_required
 def admin_dashboard(request):
-    return render(request, 'usuarios/admin_dashboard.html')
+    context = {
+        'admin_username': request.user.username,
+    }
+    return render(request, 'usuarios/admin_dashboard.html', context)
 
 
 @monitor_required
 def monitor_dashboard(request):
     return HttpResponse("Monitor dashboard")
+
+
+@admin_required
+@require_http_methods(["POST"])
+@csrf_protect
+def ai_chat_api(request):
+    """
+    Endpoint API para recibir mensajes y devolver respuestas del bot IA.
+    
+    - Solo accesible por admins autenticados (@admin_required)
+    - session_id = request.user.username (contexto aislado en BD vectorial)
+    - Ejecuta get_ai_response async de forma sincrónica
+    """
+    try:
+        data = json.loads(request.body)
+        user_message = data.get('message', '').strip()
+        
+        if not user_message:
+            return JsonResponse({'error': 'Mensaje vacío'}, status=400)
+        
+        # session_id es el username del admin (contexto crítico)
+        session_id = request.user.username
+        
+        # Convertir async a sync
+        ai_response = async_to_sync(get_ai_response)(
+            user_message=user_message,
+            session_id=session_id
+        )
+        
+        return JsonResponse({
+            'success': True,
+            'response': ai_response,
+            'session_id': session_id,
+        })
+        
+    except json.JSONDecodeError:
+        return JsonResponse({'error': 'JSON inválido'}, status=400)
+    except PermissionDenied:
+        return JsonResponse({'error': 'No tienes permisos'}, status=403)
+    except Exception as e:
+        return JsonResponse(
+            {'error': f'Error: {str(e)}'}, 
+            status=500
+        )
