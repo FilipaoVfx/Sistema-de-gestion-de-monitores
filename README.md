@@ -47,7 +47,7 @@ En la base de datos, cada asesor registrado tendrá el horario del semestre. Est
 
 ## Stack Tecnológico
 * **Backend:** Python & Django.
-* **Base de Datos:** PostgreSQL / MySQL.
+* **Base de Datos:** PostgreSQL + pgvector 
 * **IA Orchestration:** Google Gemini API & MCP Framework.
 * **Data Processing:** Pandas, Openpyxl & RapidFuzz.
 * **Seguridad:** SMTPLib & Custom SQL Validators.
