@@ -11,7 +11,7 @@ Solución aplicada: flujo consistente con Gemini (google-generativeai) + MCP:
 3) Gemini redacta la respuesta final usando únicamente los resultados.
 
 Característica de Memoria a Corto Plazo:
-- Recupera historial de los últimos 2 minutos desde chat_history
+- Recupera historial de los últimos 10 minutos desde chat_history
 - Inyecta este contexto en el prompt para evitar pérdida de contexto temporal
 - Usa sync_to_async para ejecutar consultas Django en contexto async
 """
@@ -58,6 +58,9 @@ DESTRUCTIVE_INTENT_KEYWORDS = (
 )
 
 
+# Construyo una URL de conexión a Postgres a partir de variables sueltas (DB_*).
+# La uso como fallback cuando no existe `DATABASE_URL`.
+# Devuelve `None` si falta alguna variable requerida.
 def _build_database_url_from_parts() -> str | None:
     name = os.getenv("DB_NAME")
     user = os.getenv("DB_USER")
@@ -73,6 +76,9 @@ def _build_database_url_from_parts() -> str | None:
     return f"postgresql://{user_enc}:{pass_enc}@{host}:{port}/{name}"
 
 
+# Obtengo la URL final de base de datos que usa el orquestador.
+# Prioridad: `DATABASE_URL` (si existe) → reconstrucción por partes (DB_*).
+# Lanza error si no hay forma de armarla, porque sin esto no hay memoria/historial.
 def _get_database_url() -> str:
     database_url = os.getenv("DATABASE_URL") or _build_database_url_from_parts()
     if not database_url:
@@ -82,12 +88,17 @@ def _get_database_url() -> str:
     return database_url
 
 
+# Convierto un embedding (lista de floats) al literal que entiende pgvector.
+# Esto me permite pasarlo como parámetro a SQL sin armar manualmente el formato.
 def _embedding_to_vector_literal(embedding: list[float]) -> str:
     """Convierte una lista de floats al literal que entiende pgvector: [0.1, 0.2, ...]."""
     # json.dumps genera un formato compatible: [0.1, 0.2, ...]
     return json.dumps([float(x) for x in embedding])
 
 
+# Genero embeddings para texto usando Gemini (google-generativeai).
+# Intento varios modelos candidatos y fuerzo dimensionalidad (por defecto 768) para que
+# coincida con el tipo `vector(768)` en Postgres si lo tienes así configurado.
 def _embed_text(text: str) -> list[float]:
     """Obtiene embeddings con `google-generativeai`.
 
@@ -143,6 +154,9 @@ def _embed_text(text: str) -> list[float]:
     raise RuntimeError(f"No pude obtener embedding con ningún modelo. Último error: {last_exc}")
 
 
+# Resuelvo la API key de Gemini desde el entorno.
+# Acepto varias variables por compatibilidad (GEMINI_API_KEY/GOOGLE_API_KEY/API_KEY).
+# Si no existe, fallo rápido con un mensaje claro para configuración.
 def _get_gemini_api_key() -> str:
 	api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY") or os.getenv("API_KEY")
 	if not api_key:
@@ -152,6 +166,8 @@ def _get_gemini_api_key() -> str:
 	return api_key
 
 
+# Creo el modelo de Gemini que se usa para planificar y redactar respuestas.
+# Le inyecto el system prompt del proyecto (`SYSTEM_PROMPT_MONITORES`).
 def _get_gemini_model() -> genai.GenerativeModel:
 	genai.configure(api_key=_get_gemini_api_key())
 	# Nota: el set de modelos disponibles depende de tu API key.
@@ -163,6 +179,9 @@ def _get_gemini_model() -> genai.GenerativeModel:
 	)
 
 
+# Extraigo un JSON (objeto) desde la respuesta del modelo.
+# Primero intento parsear el texto completo; si viene “ensuciado”, busco el primer bloque { ... }.
+# Esto evita que el resto del orquestador tenga que “adivinar” el formato.
 def _extract_json_object(text: str) -> dict[str, Any]:
 	text = (text or "").strip()
 	if not text:
@@ -184,11 +203,15 @@ def _extract_json_object(text: str) -> dict[str, Any]:
 	return obj
 
 
+# Detección rápida por texto: si el usuario parece pedir borrar/alterar/crear datos,
+# bloqueo el flujo antes de que el modelo intente fabricar SQL peligroso.
 def _contiene_intento_destructivo(texto: str) -> bool:
 	texto_upper = (texto or "").upper()
 	return any(keyword in texto_upper for keyword in DESTRUCTIVE_INTENT_KEYWORDS)
 
 
+# Formateo el output de una tool MCP para guardarlo/mostrarlo en el prompt.
+# Si es JSON, lo “pretty-print”; si no, lo dejo como texto.
 def _formatear_mcp_resultado(tool_name: str, raw_text: str) -> str:
 	raw_text = (raw_text or "").strip()
 	if not raw_text:
@@ -200,6 +223,8 @@ def _formatear_mcp_resultado(tool_name: str, raw_text: str) -> str:
 		return f"[{tool_name}]\n{raw_text}"
 
 
+# Llamo una herramienta MCP levantando el servidor local `mcp_server.py` por stdio.
+# Devuelve el texto de la primera “content block” si está disponible.
 async def _call_mcp_tool(tool_name: str, arguments: dict[str, Any]) -> str:
 	server_params = StdioServerParameters(
 		command=sys.executable,
@@ -215,6 +240,10 @@ async def _call_mcp_tool(tool_name: str, arguments: dict[str, Any]) -> str:
 				return str(result)
 
 
+# Catálogo de tools que le paso al modelo.
+# Importante: aquí fuerzo que responda SOLO con JSON, y con dos “acciones” posibles:
+# - tool_call → ejecutar una herramienta
+# - final → responder al usuario
 def _build_tool_catalog() -> str:
 	return """
 Herramientas MCP disponibles:
@@ -239,18 +268,24 @@ Si necesitas más de una tool, usa una por turno y espera el resultado antes de 
 """.strip()
 
 
+# Heurística simple: detecto si el usuario está pidiendo un reporte descargable (Excel).
+# Si detecto esto y la consulta devuelve rows, genero el archivo via MCP.
 def _solicita_reporte_excel(texto: str) -> bool:
 	texto = (texto or "").lower()
 	palabras_clave = ("excel", "xlsx", "reporte", "informe", "archivo", "descargar")
 	return any(palabra in texto for palabra in palabras_clave)
 
 
+# Derivo un nombre “amigable” (y seguro) para el reporte a partir de la pregunta del usuario.
+# Esto evita nombres raros y limita longitud para que el archivo sea manejable.
 def _nombre_reporte_desde_pregunta(texto: str) -> str:
 	texto = re.sub(r"[^a-zA-Z0-9]+", "_", (texto or "").strip().lower())
 	texto = texto.strip("_")
 	return texto[:40] or "reporte"
 
 
+# Notificación de seguridad: envío un correo al jefe de departamento si alguien intenta
+# algo destructivo (por texto o por SQL). Si falta config, prefiero fallar explícito.
 def _enviar_alerta_jefe(usuario: str, sql_peligroso: str) -> None:
 	"""Envía el correo de alerta al jefe de departamento."""
 	destinatario = getattr(settings, "EMAIL_JEFE_DEPARTAMENTO", None)
@@ -278,6 +313,8 @@ def _enviar_alerta_jefe(usuario: str, sql_peligroso: str) -> None:
 	)
 
 
+# Wrapper de bloqueo: intento notificar por correo (best-effort) y devuelvo un mensaje
+# legible para el usuario. Nunca ejecuto el intento.
 def _bloquear_intento_destructivo(usuario: str, intento: str) -> str:
 	error_correo = None
 	try:
@@ -291,6 +328,9 @@ def _bloquear_intento_destructivo(usuario: str, intento: str) -> str:
 	return mensaje
 
 
+# Valido SQL generado por el modelo: solo permito SELECT/WITH (solo lectura).
+# Si detecto palabras destructivas, bloqueo y reporto (alerta por correo) mediante
+# `_bloquear_intento_destructivo`.
 def _validate_sql(sql_query: str, session_id: str = "Usuario Desconocido") -> str:
 	sql_query = (sql_query or "").strip()
 	if not sql_query:
@@ -310,46 +350,52 @@ def _validate_sql(sql_query: str, session_id: str = "Usuario Desconocido") -> st
 	return sql_query
 
 # --- FUNCIONES DE MEMORIA CORTO PLAZO ---
+
+# Recupero el historial “reciente” del chat desde la tabla `chat_history`.
+# Lo hago de forma sincrónica para reutilizar psycopg2, y luego lo envuelvo con
+# `sync_to_async` cuando lo llamo desde el flujo async.
 def _recuperar_memoria_corto_plazo_sync(session_id: str) -> str:
-    """Consulta sincrónica para recuperar el historial de los últimos 5 minutos.
-    
-    Esta función se ejecuta dentro de sync_to_async para evitar bloqueos.
-    Recupera mensajes del historial de chat donde:
-    - session_id coincide con el del admin
-    - created_at >= hace 5  minutos
-    
-    Devuelve un string formateado o vacío si hay error.
-    """
-    try:
-        conn = psycopg2.connect(_get_database_url())
-        try:
-            with conn.cursor() as cur:
-                # Consultar los últimos 5 minutos de historial
-                five_minutes_ago = timezone.now() - timedelta(minutes=5)
-                cur.execute(
-                    """
-                    SELECT user_message, ai_response
-                    FROM chat_history
-                    WHERE session_id = %s AND created_at >= %s
-                    ORDER BY created_at ASC
-                    """,
-                    (session_id, five_minutes_ago),
-                )
-                registros = cur.fetchall()
-        finally:
-            conn.close()
+	"""Consulta sincrónica para recuperar el historial de los últimos 10 minutos.
 
-        if registros:
-            memoria_texto = ""
-            for user_msg, ai_resp in registros:
-                memoria_texto += f"Usuario: {user_msg}\nAsistente: {ai_resp}\n"
-            return memoria_texto.strip()
-        return ""
-    except Exception:
-        # Best-effort: si falla, devolvemos vacío para no romper el chat
-        return ""
+	Esta función se ejecuta dentro de `sync_to_async` para evitar bloqueos.
+	Recupera mensajes del historial de chat donde:
+	- session_id coincide con el del admin
+	- created_at >= hace 10 minutos
+
+	Devuelve un string formateado o vacío si hay error.
+	"""
+	try:
+		conn = psycopg2.connect(_get_database_url())
+		try:
+			with conn.cursor() as cur:
+				# Consultar los últimos 10 minutos de historial
+				ten_minutes_ago = timezone.now() - timedelta(minutes=10)
+				cur.execute(
+					"""
+					SELECT user_message, ai_response
+					FROM chat_history
+					WHERE session_id = %s AND created_at >= %s
+					ORDER BY created_at ASC
+					""",
+					(session_id, ten_minutes_ago),
+				)
+				registros = cur.fetchall()
+		finally:
+			conn.close()
+
+		if registros:
+			memoria_texto = ""
+			for user_msg, ai_resp in registros:
+				memoria_texto += f"Usuario: {user_msg}\nAsistente: {ai_resp}\n"
+			return memoria_texto.strip()
+		return ""
+	except Exception:
+		# Best-effort: si falla, devolvemos vacío para no romper el chat
+		return ""
 
 
+# Guardo cada interacción en `chat_history` (best-effort).
+# Si por alguna razón falla la DB, no rompo el chat: simplemente no persisto.
 def _guardar_en_historial_sync(session_id: str, user_message: str, ai_response: str) -> None:
     """Guarda la interacción en la tabla chat_history (best-effort)."""
     try:
@@ -369,6 +415,9 @@ def _guardar_en_historial_sync(session_id: str, user_message: str, ai_response: 
     except Exception:
         return
 
+
+# Busco “memoria semántica” (recuerdos parecidos) usando embeddings + pgvector.
+# Esto complementa la memoria corta: permite recordar cosas mencionadas antes en la sesión.
 def buscar_memoria_relevante(query_texto: str, session_id: str) -> str:
     """Busca recuerdos similares en `ai_memory` usando pgvector.
 
@@ -388,7 +437,7 @@ def buscar_memoria_relevante(query_texto: str, session_id: str) -> str:
                     FROM ai_memory
                     WHERE session_id = %s
                     ORDER BY embedding <=> %s::vector
-                    LIMIT 2
+					LIMIT 3
                     """,
                     (session_id, vector_literal),
                 )
@@ -406,6 +455,8 @@ def buscar_memoria_relevante(query_texto: str, session_id: str) -> str:
         return ""
 
 
+	# Persisto la conversación en `ai_memory` junto con el embedding para búsquedas futuras.
+	# También es best-effort: si no hay tabla/extensión/permisos, no interrumpo la respuesta.
 def guardar_en_memoria(query: str, response: str, session_id: str) -> None:
     """Guarda la interacción en `ai_memory` (best-effort)."""
     try:
@@ -428,6 +479,13 @@ def guardar_en_memoria(query: str, response: str, session_id: str) -> None:
     except Exception:
         return
 
+
+# Punto de entrada principal: genera la respuesta del asistente.
+# Flujo resumido:
+# 1) Bloqueo temprano si detecto intención destructiva.
+# 2) Recupero memoria reciente + recuerdos por similitud.
+# 3) Hago un bucle de planificación: Gemini decide si llama tools MCP o responde final.
+# 4) Redacto respuesta final usando solo resultados de tools/memoria y persisto historial.
 async def get_ai_response(user_message: str, session_id: str = "default") -> str:
 	"""Genera respuesta del asistente usando Gemini + MCP."""
 
@@ -443,7 +501,7 @@ async def get_ai_response(user_message: str, session_id: str = "default") -> str
 	prompt_memoria = ""
 	if memoria_corto_plazo:
 		prompt_memoria = (
-			"<MEMORIA RECIENTE (ULTIMOS 5 MINUTOS - PRIORIDAD MAXIMA)>\n"
+			"<MEMORIA RECIENTE (ULTIMOS 10 MINUTOS - PRIORIDAD MAXIMA)>\n"
 			"Aqui esta el contexto inmediato de la conversacion. Si el usuario hace referencia a algo reciente, "
 			"retienes esta informacion como fuente principal:\n"
 			f"{memoria_corto_plazo}\n"
