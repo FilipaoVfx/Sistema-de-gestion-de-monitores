@@ -3,4 +3,3 @@ venv/
 __pycache__/
 # Media files
 media/reports/*.xlsx
-media/reports/
