@@ -12,6 +12,9 @@ https://docs.djangoproject.com/en/6.0/ref/settings/
 
 from pathlib import Path
 from decouple import config
+import os
+from pathlib import Path
+from dotenv import load_dotenv
 
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
@@ -22,7 +25,8 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # See https://docs.djangoproject.com/en/6.0/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'django-insecure--6^eg3fylv1l41h1*tj9lm-&l*n27yd20hsevjqdjeo_8y+fr-'
+SECRET_KEY = os.getenv("DJANGO_SECRET_KEY")
+
 
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
@@ -36,6 +40,7 @@ INSTALLED_APPS = [
     'usuarios',
     'salas',
     'horarios',
+    'semestres',
     'asignaciones',
     'cambios',
     'django.contrib.admin',
@@ -44,7 +49,10 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
+    'django.contrib.postgres',
 ]
+
+AUTH_USER_MODEL = 'usuarios.Usuario'
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
@@ -86,10 +94,38 @@ DATABASES = {
         'USER': config('DB_USER'),
         'PASSWORD': config('DB_PASSWORD'),
         'HOST': config('DB_HOST'),
-        'PORT': config('DB_PORT'),
+        'PORT': config('DB_PORT'), 
     }
 }
 
+# 1. Definir la ruta base (esto ya debería estar en tu archivo)
+BASE_DIR = Path(__file__).resolve().parent.parent
+
+# 2. Cargar el archivo .env especificando la ruta exacta
+# Esto asegura que Django lo encuentre sin importar desde dónde corras el servidor
+env_path = BASE_DIR / '.env'
+load_dotenv(dotenv_path=env_path)
+
+# Para desarrollo (los correos salen en la terminal):
+# Email (Gmail SMTP)
+EMAIL_BACKEND = "django.core.mail.backends.smtp.EmailBackend"
+EMAIL_HOST = "smtp.gmail.com"
+EMAIL_PORT = 587
+EMAIL_USE_TLS = True
+EMAIL_USE_SSL = False
+EMAIL_HOST_USER = os.getenv("EMAIL_HOST_USER")
+EMAIL_HOST_PASSWORD = os.getenv("EMAIL_HOST_PASSWORD")
+EMAIL_JEFE_DEPARTAMENTO = os.getenv("EMAIL_JEFE_DEPARTAMENTO")
+
+#ESTA LÍNEA (Le dice a Django cuál es el remitente por defecto)
+DEFAULT_FROM_EMAIL = EMAIL_HOST_USER
+
+
+# --- TEMPORALMENTE PARA PROBAR ---
+print(f"DEBUG: El correo cargado es: {EMAIL_HOST_USER}")
+if EMAIL_HOST_USER is None:
+    print("ERROR: No se encontró el archivo .env o las variables están vacías.")
+# --------------------------------------------
 
 # Password validation
 # https://docs.djangoproject.com/en/6.0/ref/settings/#auth-password-validators
@@ -126,3 +162,6 @@ USE_TZ = True
 # https://docs.djangoproject.com/en/6.0/howto/static-files/
 
 STATIC_URL = 'static/'
+
+MEDIA_URL = '/media/'
+MEDIA_ROOT = BASE_DIR / 'media'

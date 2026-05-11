@@ -1,0 +1,46 @@
+{% extends 'base.html' %}
+
+{#
+  admin_view.html — Panel del Administrador (UI moderna).
+  - Extiende base.html para heredar navbar/footer/paleta/Bootstrap.
+  - Los mensajes (messages) ya se renderizan arriba desde base.html con alertas Bootstrap.
+  - Acciones principales agrupadas y con botón destacado.
+  - Chat IA en sidebar derecho.
+#}
+
+{% block title %}Panel de Administración | SGM SC{% endblock %}
+
+{% block content %}
+  <div class="row g-4">
+    {# Columna izquierda: Acciones principales #}
+    <div class="col-12 col-lg-8">
+      <div class="d-flex flex-column flex-md-row align-items-md-end justify-content-between gap-3 mb-4">
+        <div>
+          <h1 class="display-6 fw-semibold text-sgmsc mb-1">Panel de Administración</h1>
+          <p class="text-muted mb-0">Gestiona las acciones principales del sistema.</p>
+        </div>
+      </div>
+
+      {# Sección: Acciones Principales #}
+      <div class="card shadow-sm border-0">
+        <div class="card-body p-4 p-md-5">
+          <h2 class="h5 fw-semibold mb-3">Acciones principales</h2>
+          <p class="text-muted mb-4">Selecciona una acción para continuar.</p>
+
+          <div class="d-grid gap-2 d-sm-flex">
+            <a class="btn btn-primary btn-lg" href="{% url 'crear_monitor' %}">Crear Monitor</a>
+            <a class="btn btn-outline-primary btn-lg" href="{% url 'crear_asignacion' %}">Crear nueva asignación</a>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    {# Columna derecha: Chat Panel #}
+    <div class="col-12 col-lg-4">
+      <form style="display: none;" aria-hidden="true">
+        {% csrf_token %}
+      </form>
+      {% include 'usuarios/partials/chat_panel.html' %}
+    </div>
+  </div>
+{% endblock %}
