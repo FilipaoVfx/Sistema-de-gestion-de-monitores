@@ -173,7 +173,9 @@ def generate_excel_report(data_json: str, report_name: str = "reporte"):
         ws.column_dimensions[ws.cell(row=1, column=i).column_letter].width = max_len
     wb.save(full_path)
 
-    return f"http://127.0.0.1:8000/{settings.MEDIA_URL}{relative_path}"
+    media_url = (settings.MEDIA_URL or "/media/").rstrip("/") + "/"
+    relative_url_path = relative_path.replace(os.sep, "/").lstrip("/")
+    return f"{media_url}{relative_url_path}"
 
 
 @mcp.tool()
