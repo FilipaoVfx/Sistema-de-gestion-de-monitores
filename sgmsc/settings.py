@@ -165,3 +165,4 @@ STATIC_URL = 'static/'
 
 MEDIA_URL = '/media/'
 MEDIA_ROOT = BASE_DIR / 'media'
+SITE_URL = os.getenv('SITE_URL', 'http://localhost:8000')
