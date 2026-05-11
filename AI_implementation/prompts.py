@@ -50,10 +50,10 @@ Tu objetivo es responder a las preguntas del administrador extrayendo informaci√
 
 6. Tabla: 'ai_memory' (Memoria de contexto para conversaciones con el asistente)
     - `id` (integer) - LLAVE PRIMARIA
-    - `session` (text)
+    - `session_id` (text)
     - `user_query` (text)
     - `ai_response` (text)
-    - `embeddings` (vector) - Vector de 768 dimensiones
+    - `embedding` (vector) - Vector de 768 dimensiones
     - `created_at` (timestamp) - Fecha y hora de creaci√≥n
     
 
