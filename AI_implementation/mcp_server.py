@@ -173,9 +173,12 @@ def generate_excel_report(data_json: str, report_name: str = "reporte"):
         ws.column_dimensions[ws.cell(row=1, column=i).column_letter].width = max_len
     wb.save(full_path)
 
-    media_url = (settings.MEDIA_URL or "/media/").rstrip("/") + "/"
-    relative_url_path = relative_path.replace(os.sep, "/").lstrip("/")
-    return f"{media_url}{relative_url_path}"
+    relative_url_path = relative_path.replace("\\", "/").replace(os.sep, "/").lstrip("/")
+    site_url = (settings.SITE_URL or "http://localhost:8000").rstrip("/")
+    media_url = (settings.MEDIA_URL or "/media/").strip("/")
+    url_final = f"{site_url}/{media_url}/{relative_url_path}" if media_url else f"{site_url}/{relative_url_path}"
+    url_final = re.sub(r"(?<!:)//+", "/", url_final)
+    return f"✅ Informe generado con éxito. [📥 Descargar Informe Excel]({url_final})"
 
 
 @mcp.tool()
