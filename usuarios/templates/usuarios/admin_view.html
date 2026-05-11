@@ -37,6 +37,9 @@
 
     {# Columna derecha: Chat Panel #}
     <div class="col-12 col-lg-4">
+      <form style="display: none;" aria-hidden="true">
+        {% csrf_token %}
+      </form>
       {% include 'usuarios/partials/chat_panel.html' %}
     </div>
   </div>
