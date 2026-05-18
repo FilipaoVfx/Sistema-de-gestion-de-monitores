@@ -50,4 +50,4 @@ class Horario(models.Model):
         super().save(*args, **kwargs)
 
     def __str__(self):
-        return f"{self.get_dia_semana_display()}: {self.hora_inicio} - {self.hora_fin} ({self.sala})"
+        return f"{self.get_dia_semana_display()}: {self.hora_inicio.strftime('%H:%M')} - {self.hora_fin.strftime('%H:%M')} ({self.sala})"

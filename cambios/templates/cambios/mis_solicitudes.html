@@ -1,0 +1,65 @@
+{% extends 'base.html' %}
+
+{% block title %}Mis Solicitudes | SGM SC{% endblock %}
+
+{% block content %}
+  <div class="d-flex justify-content-center py-5">
+    <div style="max-width: 1200px; width: 100%; padding: 0 20px;">
+      <div class="card shadow-sm border-0">
+        <div class="card-body p-4 p-md-5">
+          <div class="d-flex flex-column flex-sm-row align-items-sm-start justify-content-between gap-3 mb-4">
+            <div>
+              <h1 class="h4 fw-semibold text-sgmsc mb-1">Mis Solicitudes de Cambio</h1>
+              <p class="text-muted mb-0">Lista de tus solicitudes de cambio de turno.</p>
+            </div>
+            <div class="d-flex gap-2">
+              <a class="btn btn-outline-secondary" href="{% url 'monitor_dashboard' %}">Volver al panel</a>
+              <a class="btn btn-primary" href="{% url 'crear_solicitud' %}">Nueva solicitud</a>
+            </div>
+          </div>
+
+          {% if solicitudes %}
+            <div class="table-responsive">
+              <table class="table table-striped table-hover align-middle">
+                <thead class="table-light">
+                  <tr>
+                    <th>Asignación</th>
+                    <th>Reemplazo</th>
+                    <th>Estado</th>
+                    <th>Fecha</th>
+                    <th>Motivo</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {% for solicitud in solicitudes %}
+                    <tr>
+                      <td>
+                        {{ solicitud.asignacion }}
+                      </td>
+                      <td>{{ solicitud.monitor_reemplazo.get_full_name|default:solicitud.monitor_reemplazo.email }}</td>
+                      <td>
+                        <span class="badge 
+                          {% if solicitud.estado == 'pendiente' %}bg-warning
+                          {% elif solicitud.estado == 'aprobada' %}bg-success
+                          {% elif solicitud.estado == 'rechazada' %}bg-danger
+                          {% else %}bg-secondary{% endif %}">
+                          {{ solicitud.get_estado_display }}
+                        </span>
+                      </td>
+                      <td>{{ solicitud.fecha_creacion|date:"d/m/Y H:i" }}</td>
+                      <td>{{ solicitud.motivo|default:"Sin motivo" }}</td>
+                    </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            </div>
+          {% else %}
+            <div class="alert alert-info" role="alert">
+              <p class="mb-0">No has creado ninguna solicitud de cambio aún.</p>
+            </div>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+  </div>
+{% endblock %}

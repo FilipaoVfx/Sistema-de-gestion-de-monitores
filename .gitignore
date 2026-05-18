@@ -1,5 +1,10 @@
 .env
 venv/
 __pycache__/
+.agents
+skills-lock.json
+pgvector/
+*.pyc
+db.sqlite3
 # Media files
 media/reports/*.xlsx

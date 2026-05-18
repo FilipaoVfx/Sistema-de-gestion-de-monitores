@@ -1,0 +1,67 @@
+{% extends 'base.html' %}
+
+{% block title %}Detalle de Solicitud | SGM SC{% endblock %}
+
+{% block content %}
+  <div class="d-flex justify-content-center py-5">
+    <div style="max-width: 800px; width: 100%; padding: 0 20px;">
+      <div class="card shadow-sm border-0">
+        <div class="card-body p-4 p-md-5">
+          <div class="d-flex flex-column flex-sm-row align-items-sm-start justify-content-between gap-3 mb-4">
+            <div>
+              <h1 class="h4 fw-semibold text-sgmsc mb-1">Detalle de Solicitud</h1>
+              <p class="text-muted mb-0">Información detallada de la solicitud de cambio.</p>
+            </div>
+            <a class="btn btn-outline-secondary" href="{% url 'lista_solicitudes' %}">Volver a la lista</a>
+          </div>
+
+          <div class="row g-3">
+            <div class="col-12">
+              <div class="card mb-4">
+                <div class="card-body">
+                  <h5 class="card-title">Información de la Solicitud</h5>
+                  <dl class="row">
+                    <dt class="col-sm-3">ID Solicitud</dt>
+                    <dd class="col-sm-9">{{ solicitud.id_cambio }}</dd>
+                    
+                    <dt class="col-sm-3">Asignación</dt>
+                    <dd class="col-sm-9">{{ solicitud.asignacion }}</dd>
+                    
+                    <dt class="col-sm-3">Solicitante</dt>
+                    <dd class="col-sm-9">{{ solicitud.solicitante.get_full_name|default:solicitud.solicitante.email }}</dd>
+                    
+                    <dt class="col-sm-3">Monitor Reemplazo</dt>
+                    <dd class="col-sm-9">{{ solicitud.monitor_reemplazo.get_full_name|default:solicitud.monitor_reemplazo.email }}</dd>
+                    
+                    <dt class="col-sm-3">Estado</dt>
+                    <dd class="col-sm-9">
+                      <span class="badge 
+                        {% if solicitud.estado == 'pendiente' %}bg-warning
+                        {% elif solicitud.estado == 'aprobada' %}bg-success
+                        {% elif solicitud.estado == 'rechazada' %}bg-danger
+                        {% else %}bg-secondary{% endif %}">
+                        {{ solicitud.get_estado_display }}
+                      </span>
+                    </dd>
+                    
+                    <dt class="col-sm-3">Fecha de creación</dt>
+                    <dd class="col-sm-9">{{ solicitud.fecha_creacion|date:"d/m/Y H:i" }}</dd>
+                    
+                    <dt class="col-sm-3">Motivo</dt>
+                    <dd class="col-sm-9">{{ solicitud.motivo|default:"Sin motivo" }}</dd>
+                  </dl>
+                </div>
+              </div>
+              
+              {% if solicitud.estado == 'pendiente' %}
+                <div class="d-grid gap-2 d-md-flex justify-content-md-end">
+                  <a href="{% url 'responder_solicitud' solicitud.id_cambio %}" class="btn btn-primary">Responder solicitud</a>
+                </div>
+              {% endif %}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+{% endblock %}
