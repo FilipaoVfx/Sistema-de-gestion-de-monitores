@@ -1,0 +1,80 @@
+{% extends 'base.html' %}
+
+{% block title %}Responder Solicitud | SGM SC{% endblock %}
+
+{% block content %}
+  <div class="d-flex justify-content-center py-5">
+    <div style="max-width: 800px; width: 100%; padding: 0 20px;">
+      <div class="card shadow-sm border-0">
+        <div class="card-body p-4 p-md-5">
+          <div class="d-flex flex-column flex-sm-row align-items-sm-start justify-content-between gap-3 mb-4">
+            <div>
+              <h1 class="h4 fw-semibold text-sgmsc mb-1">Responder Solicitud</h1>
+              <p class="text-muted mb-0">Aprobar o rechazar la solicitud de cambio de turno.</p>
+            </div>
+            <a class="btn btn-outline-secondary" href="{% url 'lista_solicitudes' %}">Volver a la lista</a>
+          </div>
+
+          <div class="row g-3 mb-4">
+            <div class="col-12">
+              <div class="card">
+                <div class="card-body">
+                  <h5 class="card-title">Información de la Solicitud</h5>
+                  <dl class="row">
+                    <dt class="col-sm-3">Asignación</dt>
+                    <dd class="col-sm-9">{{ solicitud.asignacion }}</dd>
+                    
+                    <dt class="col-sm-3">Solicitante</dt>
+                    <dd class="col-sm-9">{{ solicitud.solicitante.get_full_name|default:solicitud.solicitante.email }}</dd>
+                    
+                    <dt class="col-sm-3">Monitor Reemplazo</dt>
+                    <dd class="col-sm-9">{{ solicitud.monitor_reemplazo.get_full_name|default:solicitud.monitor_reemplazo.email }}</dd>
+                    
+                    <dt class="col-sm-3">Motivo</dt>
+                    <dd class="col-sm-9">{{ solicitud.motivo|default:"Sin motivo" }}</dd>
+                  </dl>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <form method="post" novalidate>
+            {% csrf_token %}
+
+            {% if form.non_field_errors %}
+              <div class="alert alert-danger shadow-sm" role="alert">
+                {{ form.non_field_errors }}
+              </div>
+            {% endif %}
+
+            <div class="row g-3">
+              <div class="col-12">
+                <label class="form-label" for="{{ form.estado.id_for_label }}">{{ form.estado.label }}</label>
+                {{ form.estado }}
+                {% if form.estado.errors %}
+                  {% for error in form.estado.errors %}
+                    <div class="text-danger small">{{ error }}</div>
+                  {% endfor %}
+                {% endif %}
+              </div>
+
+              <div class="col-12">
+                <label class="form-label" for="{{ form.respuesta.id_for_label }}">{{ form.respuesta.label }}</label>
+                {{ form.respuesta }}
+                {% if form.respuesta.errors %}
+                  {% for error in form.respuesta.errors %}
+                    <div class="text-danger small">{{ error }}</div>
+                  {% endfor %}
+                {% endif %}
+              </div>
+            </div>
+
+            <div class="d-grid mt-4">
+              <button class="btn btn-primary btn-lg" type="submit">Enviar respuesta</button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+  </div>
+{% endblock %}

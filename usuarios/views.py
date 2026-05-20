@@ -116,7 +116,7 @@ def admin_dashboard(request):
 
 @monitor_required
 def monitor_dashboard(request):
-    return HttpResponse("Monitor dashboard")
+    return render(request, 'usuarios/monitor_dashboard.html')
 
 
 @admin_required

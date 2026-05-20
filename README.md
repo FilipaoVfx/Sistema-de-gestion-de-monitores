@@ -55,4 +55,4 @@ En la base de datos, cada asesor registrado tendrá el horario del semestre. Est
 ## Desarrolladores del Proyecto
 * **Juan Andres Muñoz Zapata**
 * **Enmanuel Velasquez Romero**
-* **Juan Andres Rojas Sabedra**
+* **Juan Andres Rojas Saavedra**
