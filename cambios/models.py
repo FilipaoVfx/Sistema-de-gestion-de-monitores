@@ -1,6 +1,8 @@
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import models
+from django.db.models import Q
+from django.db.models.constraints import UniqueConstraint
 from django.utils.timezone import now
 
 
@@ -69,6 +71,13 @@ class SolicitudCambio(models.Model):
 
 	class Meta:
 		ordering = ["-fecha_creacion"]
+		constraints = [
+			UniqueConstraint(
+				fields=["asignacion"],
+				condition=Q(estado="pendiente"),
+				name="unique_pending_solicitud_per_asignacion",
+			),
+		]
 
 	def clean(self):
 		# 1. El solicitante debe ser el dueño de la asignación (solo al crear)

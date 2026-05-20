@@ -1,34 +1,11 @@
 from django.contrib import messages
-from django.contrib.auth.decorators import login_required
-from django.core.exceptions import PermissionDenied, ValidationError
+from django.core.exceptions import ValidationError
 from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_http_methods
-from django.http import HttpResponseForbidden
-
-from usuarios.models import Usuario
-
+from usuarios.views import admin_required, monitor_required
 from .forms import ResponderSolicitudForm, SolicitudCambioForm
 from .models import SolicitudCambio
-from .services import aprobar_solicitud, crear_solicitud_cambio, rechazar_solicitud
-
-
-def role_required(expected_role):
-	"""Decorador para verificar el rol del usuario."""
-	from functools import wraps
-
-	def decorator(view_func):
-		@wraps(view_func)
-		@login_required
-		def _wrapped(request, *args, **kwargs):
-			if request.user.rol != expected_role:
-				raise PermissionDenied
-			return view_func(request, *args, **kwargs)
-		return _wrapped
-	return decorator
-
-
-admin_required = role_required(Usuario.ADMIN)
-monitor_required = role_required(Usuario.MONITOR)
+from .services import aprobar_solicitud, rechazar_solicitud
 
 
 # =========================
