@@ -18,7 +18,7 @@ class SolicitudCambioModelTests(TestCase):
 
 	@classmethod
 	def setUpTestData(cls):
-		cls.sala = Sala.objects.create(codigo="SALA-101", nombre="Laboratorio 101")
+		cls.sala = Sala.objects.create(codigo="SALA-101", nombre="Laboratorio 101", capacidad=40)
 		cls.semestre = Semestre.objects.create(anio=2025, periodo=1, activo=True)
 		cls.horario = Horario.objects.create(
 			sala=cls.sala,
@@ -105,19 +105,24 @@ class SolicitudCambioModelTests(TestCase):
 
 	def test_reemplazo_sin_conflicto(self):
 		"""Bloquear si el reemplazo tiene conflicto de horario."""
-		# Asignar al monitor2 el mismo horario
-		Asignacion.objects.create(
-			monitor=self.monitor2,
-			horario=self.horario,
-			semestre=self.semestre,
-		)
-		# Crear otra sala y horario no conflictivo para monitor1
-		sala2 = Sala.objects.create(codigo="SALA-102", nombre="Otra Sala")
+		# Crear otra sala con un horario conflictivo para monitor2
+		sala2 = Sala.objects.create(codigo="SALA-102", nombre="Otra Sala", capacidad=40)
 		horario2 = Horario.objects.create(
 			sala=sala2,
 			dia_semana=1,
 			hora_inicio="10:00",
 			hora_fin="12:00",
+		)
+		horario_conflictivo = Horario.objects.create(
+			sala=sala2,
+			dia_semana=1,
+			hora_inicio="11:00",
+			hora_fin="13:00",
+		)
+		Asignacion.objects.create(
+			monitor=self.monitor2,
+			horario=horario_conflictivo,
+			semestre=self.semestre,
 		)
 		asignacion2 = Asignacion.objects.create(
 			monitor=self.monitor1,
@@ -161,7 +166,7 @@ class SolicitudCambioServiceTests(TestCase):
 
 	@classmethod
 	def setUpTestData(cls):
-		cls.sala = Sala.objects.create(codigo="SALA-101", nombre="Laboratorio 101")
+		cls.sala = Sala.objects.create(codigo="SALA-101", nombre="Laboratorio 101", capacidad=40)
 		cls.semestre = Semestre.objects.create(anio=2025, periodo=1, activo=True)
 		cls.horario = Horario.objects.create(
 			sala=cls.sala,
