@@ -16,7 +16,9 @@ const navItems = [
 
 export default function Sidebar() {
   const { user, logout } = useAuth()
-  const displayName = user?.nombre || user?.email || 'Usuario'
+  const displayName = (user?.first_name && user?.last_name)
+    ? `${user.first_name} ${user.last_name}`
+    : user?.first_name || user?.email || 'Usuario'
   const initial = displayName.charAt(0).toUpperCase()
 
   return (
