@@ -17,7 +17,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user,    setUser]    = useState<SessionUser | null>(null)
   const [loading, setLoading] = useState(true)
 
-  // Al arrancar: detecta si hay cookie de sesión válida
+  // Al arrancar: verifica si hay token válido en localStorage
   useEffect(() => {
     authApi.me()
       .then(u => setUser(u))
@@ -26,15 +26,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const login = async (email: string, password: string) => {
-    await authApi.login(email, password)
-    // Si la cookie sessionid se setea correctamente, asumimos sesión activa
-    const u = await authApi.me()
-    if (!u) throw new Error('Credenciales inválidas')
+    const u = await authApi.login(email, password)
     setUser(u)
   }
 
   const logout = async () => {
-    await authApi.logout().catch(() => {})
+    await authApi.logout()
     setUser(null)
   }
 

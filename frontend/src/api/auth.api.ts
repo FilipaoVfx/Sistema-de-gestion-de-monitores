@@ -1,44 +1,51 @@
-import { api, postForm } from './client'
+import { api } from './client'
 
 export interface SessionUser {
+  id: number
   email: string
-  nombre?: string
-  rol?: 'administrador' | 'monitor'
+  first_name: string
+  last_name: string
+  cedula: string
+  telefono: string
+  rol: 'admin' | 'monitor'
   authenticated: boolean
 }
 
 export const authApi = {
   /**
-   * POST /usuarios/login/  (form-encoded + CSRF)
-   * El backend Django+HTMX responde con redirect 302 + cookie sessionid si OK,
-   * o vuelve a renderizar el formulario con error si falla.
+   * POST /api/auth/login/  → { token, user }
    */
-  login: (email: string, password: string) =>
-    postForm('/usuarios/login/', { email, password }),
+  login: async (email: string, password: string): Promise<SessionUser> => {
+    const res = await api.post<{ token: string; user: SessionUser }>(
+      '/api/auth/login/',
+      { email, password },
+    )
+    localStorage.setItem('auth_token', res.data.token)
+    return { ...res.data.user, authenticated: true }
+  },
 
   /**
-   * POST /usuarios/logout/  (solo POST, requiere CSRF)
+   * POST /api/auth/logout/  → 204
    */
-  logout: () => postForm('/usuarios/logout/', {}),
+  logout: async (): Promise<void> => {
+    try {
+      await api.post('/api/auth/logout/')
+    } finally {
+      localStorage.removeItem('auth_token')
+    }
+  },
 
   /**
-   * GET / para detectar si la sesión sigue activa.
-   * - Si NO hay sesión: backend redirige a /usuarios/login/ → status 200 con HTML del login
-   * - Si HAY sesión: backend redirige a /dashboard/ (404 actualmente) o a una página interna
-   *
-   * Como no hay endpoint JSON /api/auth/me/ todavía, hacemos best-effort:
-   * intentamos /salas/ (protegido) — si responde 200 estamos logueados.
+   * GET /api/auth/me/  → user info
    */
   me: async (): Promise<SessionUser | null> => {
+    const token = localStorage.getItem('auth_token')
+    if (!token) return null
     try {
-      const res = await api.get('/salas/', { maxRedirects: 0, validateStatus: () => true })
-      // Si redirigió a /accounts/login/ → no hay sesión
-      const redirected =
-        res.status === 302 ||
-        (typeof res.data === 'string' && res.data.includes('accounts/login'))
-      if (redirected) return null
-      return { email: 'session', authenticated: true }
+      const res = await api.get<SessionUser>('/api/auth/me/')
+      return { ...res.data, authenticated: true }
     } catch {
+      localStorage.removeItem('auth_token')
       return null
     }
   },

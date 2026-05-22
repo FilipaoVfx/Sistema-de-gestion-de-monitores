@@ -3,16 +3,10 @@
   "buildCommand": "npm run build",
   "outputDirectory": "dist",
   "framework": "vite",
-  "rewrites": [
-    {
-      "source": "/_api/:path*",
-      "destination": "https://sgmsc-web.onrender.com/:path*"
-    }
-  ],
   "routes": [
     {
       "src": "/_api/(.*)",
-      "dest": "https://sgmsc-web.onrender.com/$1"
+      "dest": "https://sistema-de-gestion-de-monitores.onrender.com/$1"
     },
     {
       "src": "/assets/(.*)",

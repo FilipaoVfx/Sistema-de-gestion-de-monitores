@@ -1,15 +1,22 @@
-import { api, postForm } from './client'
+import { api } from './client'
+import type { SessionUser } from './auth.api'
 
-/**
- *   GET    /monitores/         → listado
- *   GET    /monitores/crear/   → form
- *   POST   /monitores/crear/   → crear
- */
-export const monitoresApi = {
-  list:   () => api.get<string>('/monitores/'),
-  create: (data: Record<string, string | number | boolean>) => postForm('/monitores/crear/', data),
+export interface CrearMonitorData {
+  email: string
+  first_name: string
+  last_name: string
+  cedula: string
+  telefono?: string
 }
 
-export const usuariosApi = {
-  list: () => api.get<string>('/usuarios/'),
+export const monitoresApi = {
+  /** GET /api/usuarios/ → lista de usuarios */
+  list: () => api.get<SessionUser[]>('/api/usuarios/'),
+
+  /** GET /api/usuarios/{id}/ */
+  get: (id: number) => api.get<SessionUser>(`/api/usuarios/${id}/`),
+
+  /** POST /api/usuarios/monitores/ → crea monitor y envía correo de activación */
+  create: (data: CrearMonitorData) =>
+    api.post<SessionUser>('/api/usuarios/monitores/', data),
 }
