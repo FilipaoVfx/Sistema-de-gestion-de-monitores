@@ -144,26 +144,34 @@ class CrearMonitorView(generics.CreateAPIView):
                 monitor.set_password(temp_password)
                 monitor.save(update_fields=['password'])
 
-            # Best-effort: intenta mandar correo. No bloquea la respuesta.
-            try:
-                site_url = getattr(settings, 'SITE_URL', '').rstrip('/')
-                text_message = (
-                    f"Hola {monitor.first_name},\n\n"
-                    "Tu cuenta de monitor fue creada en SGMSC.\n"
-                    f"Usuario: {monitor.email}\n"
-                    f"Contrasena temporal: {temp_password}\n\n"
-                    "Por seguridad, cambia tu contrasena al iniciar sesion."
-                    + (f"\nLogin: {site_url}/usuarios/login/" if site_url else "")
-                )
-                send_mail(
-                    "Bienvenido al SGMSC - Tu contrasena temporal",
-                    text_message,
-                    getattr(settings, 'EMAIL_HOST_USER', None) or 'no-reply@sgmsc.local',
-                    [monitor.email],
-                    fail_silently=True,
-                )
-            except Exception:
-                logger.exception("Error enviando correo de bienvenida para %s", monitor.email)
+            # Best-effort: intenta mandar correo SOLO si SMTP esta configurado.
+            # Si no hay credenciales, send_mail puede colgarse esperando una
+            # conexion TCP que nunca completa, lo que mata al worker de
+            # gunicorn por timeout (SIGKILL -> SystemExit que NO se atrapa).
+            email_user = getattr(settings, 'EMAIL_HOST_USER', None)
+            email_pass = getattr(settings, 'EMAIL_HOST_PASSWORD', None)
+            if email_user and email_pass:
+                try:
+                    site_url = getattr(settings, 'SITE_URL', '').rstrip('/')
+                    text_message = (
+                        f"Hola {monitor.first_name},\n\n"
+                        "Tu cuenta de monitor fue creada en SGMSC.\n"
+                        f"Usuario: {monitor.email}\n"
+                        f"Contrasena temporal: {temp_password}\n\n"
+                        "Por seguridad, cambia tu contrasena al iniciar sesion."
+                        + (f"\nLogin: {site_url}/usuarios/login/" if site_url else "")
+                    )
+                    send_mail(
+                        "Bienvenido al SGMSC - Tu contrasena temporal",
+                        text_message,
+                        email_user,
+                        [monitor.email],
+                        fail_silently=True,
+                    )
+                except Exception:
+                    logger.exception("Error enviando correo de bienvenida para %s", monitor.email)
+            else:
+                logger.info("SMTP no configurado, no se envia correo a %s", monitor.email)
 
             payload = UsuarioSerializer(monitor).data
             payload['temporary_password'] = temp_password
