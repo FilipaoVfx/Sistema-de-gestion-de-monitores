@@ -64,6 +64,21 @@ def me_view(request):
     return Response(UsuarioSerializer(request.user).data)
 
 
+@api_view(['POST'])
+def debug_ping_view(request):
+    """POST /api/auth/debug-ping/  →  sentinela para verificar que el deploy
+    actual ejecuta codigo. Retorna info del request.user sin tocar la DB."""
+    user = request.user
+    return Response({
+        'sentinel': '9f3466a-or-newer',
+        'authenticated': bool(user and user.is_authenticated),
+        'email': getattr(user, 'email', None),
+        'rol': getattr(user, 'rol', None),
+        'is_admin_check': getattr(user, 'rol', None) == Usuario.ADMIN,
+        'usuario_admin_const': Usuario.ADMIN,
+    })
+
+
 # ---------------------------------------------------------------------------
 # User management (admin only)
 # ---------------------------------------------------------------------------
