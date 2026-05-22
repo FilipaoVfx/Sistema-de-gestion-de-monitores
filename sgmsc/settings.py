@@ -43,10 +43,17 @@ INSTALLED_APPS = [
 
 AUTH_USER_MODEL = 'usuarios.Usuario'
 
-# CORS — permitir frontend en desarrollo y producción
+# CORS — permitir frontend en desarrollo y producción.
+# CORS_ALLOWED_ORIGINS: exact-match (env var "CORS_ALLOWED_ORIGINS", coma-separada).
+# CORS_ALLOWED_ORIGIN_REGEXES: regex-match — acepta TODOS los subdominios de
+# vercel.app por defecto (cubre URLs preview tipo sgmsc-frontend-xxxx.vercel.app).
 CORS_ALLOWED_ORIGINS = os.environ.get(
     "CORS_ALLOWED_ORIGINS",
     "http://localhost:5173,http://localhost:3000,https://sgmsc-frontend.vercel.app",
+).split(",")
+CORS_ALLOWED_ORIGIN_REGEXES = os.environ.get(
+    "CORS_ALLOWED_ORIGIN_REGEXES",
+    r"^https:\/\/[a-z0-9-]+\.vercel\.app$",
 ).split(",")
 CORS_ALLOW_CREDENTIALS = True
 PASSWORD_RESET_TIMEOUT = 3600
