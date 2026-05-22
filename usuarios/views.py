@@ -98,19 +98,22 @@ class CrearMonitorView(generics.CreateAPIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def create(self, request, *args, **kwargs):
-        if request.user.rol != Usuario.ADMIN:
-            return Response({'error': 'Solo administradores pueden crear monitores.'}, status=403)
-
-        serializer = self.get_serializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-        data = serializer.validated_data
-
-        # Password: si admin la provee usa esa, sino genera una temporal
-        temp_password = (request.data.get('password') or '').strip() or _generate_temp_password()
-
-        # Usamos el patron de seed_demo (set_password despues de crear) en una
-        # transaccion atomica para evitar usuarios huerfanos si algo falla.
+        # Outer try/except como red de seguridad: cualquier excepcion no
+        # capturada en otro lado se reporta aqui con tipo+msg+traceback corto.
+        import traceback
         try:
+            if request.user.rol != Usuario.ADMIN:
+                return Response({'error': 'Solo administradores pueden crear monitores.'}, status=403)
+
+            serializer = self.get_serializer(data=request.data)
+            serializer.is_valid(raise_exception=True)
+            data = serializer.validated_data
+
+            # Password: si admin la provee usa esa, sino genera una temporal
+            temp_password = (request.data.get('password') or '').strip() or _generate_temp_password()
+
+            # Usamos el patron de seed_demo: set_password despues de crear,
+            # en una transaccion atomica para evitar usuarios huerfanos.
             with transaction.atomic():
                 monitor = Usuario.objects.create_user(
                     username=data['email'],
@@ -125,38 +128,43 @@ class CrearMonitorView(generics.CreateAPIView):
                 )
                 monitor.set_password(temp_password)
                 monitor.save(update_fields=['password'])
+
+            # Best-effort: intenta mandar correo. No bloquea la respuesta.
+            try:
+                site_url = getattr(settings, 'SITE_URL', '').rstrip('/')
+                text_message = (
+                    f"Hola {monitor.first_name},\n\n"
+                    "Tu cuenta de monitor fue creada en SGMSC.\n"
+                    f"Usuario: {monitor.email}\n"
+                    f"Contrasena temporal: {temp_password}\n\n"
+                    "Por seguridad, cambia tu contrasena al iniciar sesion."
+                    + (f"\nLogin: {site_url}/usuarios/login/" if site_url else "")
+                )
+                send_mail(
+                    "Bienvenido al SGMSC - Tu contrasena temporal",
+                    text_message,
+                    getattr(settings, 'EMAIL_HOST_USER', None) or 'no-reply@sgmsc.local',
+                    [monitor.email],
+                    fail_silently=True,
+                )
+            except Exception:
+                logger.exception("Error enviando correo de bienvenida para %s", monitor.email)
+
+            payload = UsuarioSerializer(monitor).data
+            payload['temporary_password'] = temp_password
+            return Response(payload, status=status.HTTP_201_CREATED)
+
         except Exception as exc:
-            logger.exception("Error creando monitor con email %s", data.get('email'))
+            logger.exception("Error inesperado creando monitor")
             return Response(
-                {'error': 'No se pudo crear el monitor.', 'detail': f'{type(exc).__name__}: {exc}'},
+                {
+                    'error': 'Error inesperado al crear monitor',
+                    'type': type(exc).__name__,
+                    'detail': str(exc),
+                    'traceback': traceback.format_exc()[-1500:],
+                },
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
-
-        # Best-effort: intenta mandar correo con la password temporal.
-        # No bloquea la respuesta si SMTP no esta configurado.
-        try:
-            site_url = getattr(settings, 'SITE_URL', '').rstrip('/')
-            text_message = (
-                f"Hola {monitor.first_name},\n\n"
-                "Tu cuenta de monitor fue creada en SGMSC.\n"
-                f"Usuario: {monitor.email}\n"
-                f"Contrasena temporal: {temp_password}\n\n"
-                "Por seguridad, cambia tu contrasena al iniciar sesion."
-                + (f"\nLogin: {site_url}/usuarios/login/" if site_url else "")
-            )
-            send_mail(
-                "Bienvenido al SGMSC - Tu contrasena temporal",
-                text_message,
-                getattr(settings, 'EMAIL_HOST_USER', None) or 'no-reply@sgmsc.local',
-                [monitor.email],
-                fail_silently=True,
-            )
-        except Exception:
-            logger.exception("Error enviando correo de bienvenida para %s", monitor.email)
-
-        payload = UsuarioSerializer(monitor).data
-        payload['temporary_password'] = temp_password
-        return Response(payload, status=status.HTTP_201_CREATED)
 
 
 # ---------------------------------------------------------------------------
