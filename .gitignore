@@ -1,10 +1,33 @@
+# Python / Django
 .env
+.env.local
+*.env.local
 venv/
 __pycache__/
+*.pyc
+*.pyo
+*.pyd
+db.sqlite3
+*.sqlite3
+staticfiles/
+media/
+media/reports/*.xlsx
 .agents
 skills-lock.json
 pgvector/
-*.pyc
-db.sqlite3
-# Media files
-media/reports/*.xlsx
+
+# Claude Code
+.claude/
+
+# Node / Frontend
+frontend/node_modules/
+frontend/dist/
+frontend/.env.local
+frontend/.env.*.local
+
+# Vercel
+frontend/.vercel/
+
+# OS
+.DS_Store
+Thumbs.db
