@@ -40,19 +40,12 @@ INSTALLED_APPS = [
 ]
 
 AUTH_USER_MODEL = 'usuarios.Usuario'
-
-# CORS — permitir frontend en desarrollo y producción
-CORS_ALLOWED_ORIGINS = os.environ.get(
-    "CORS_ALLOWED_ORIGINS",
-    "http://localhost:5173,http://localhost:3000",
-).split(",")
 LOGIN_URL = 'login'
 PASSWORD_RESET_TIMEOUT = 3600
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
     'whitenoise.middleware.WhiteNoiseMiddleware',
-    'corsheaders.middleware.CorsMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
