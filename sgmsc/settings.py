@@ -4,11 +4,16 @@ Django settings for sgmsc project — production-ready para Render.
 
 from pathlib import Path
 import os
+from urllib.parse import urlparse
+from dotenv import load_dotenv
 import dj_database_url
 from decouple import config
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
+
+# Cargar .env lo antes posible para que os.environ tenga las variables
+load_dotenv(BASE_DIR / '.env')
 
 # SECURITY
 SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY", config("DJANGO_SECRET_KEY", default="cambiar-esto"))
@@ -29,9 +34,6 @@ INSTALLED_APPS = [
     'semestres',
     'asignaciones',
     'cambios',
-    'monitores',
-    'rest_framework',
-    'corsheaders',
     'django.contrib.admin',
     'django.contrib.auth',
     'django.contrib.contenttypes',
@@ -42,19 +44,12 @@ INSTALLED_APPS = [
 ]
 
 AUTH_USER_MODEL = 'usuarios.Usuario'
-
-# CORS — permitir frontend en desarrollo y producción
-CORS_ALLOWED_ORIGINS = os.environ.get(
-    "CORS_ALLOWED_ORIGINS",
-    "http://localhost:5173,http://localhost:3000",
-).split(",")
 LOGIN_URL = 'login'
 PASSWORD_RESET_TIMEOUT = 3600
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
     'whitenoise.middleware.WhiteNoiseMiddleware',
-    'corsheaders.middleware.CorsMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
@@ -92,8 +87,6 @@ if DATABASE_URL:
     }
 else:
     # Fallback para desarrollo local con .env
-    from dotenv import load_dotenv
-    load_dotenv(BASE_DIR / '.env')
     DATABASES = {
         'default': {
             'ENGINE': 'django.db.backends.postgresql',
@@ -143,6 +136,17 @@ MEDIA_URL = '/media/'
 MEDIA_ROOT = BASE_DIR / 'media'
 
 # Site URL (para links en correos y descarga de xlsx)
-SITE_URL = os.environ.get('SITE_URL', 'http://localhost:8000')
+_raw_site_url = os.environ.get('SITE_URL', 'http://localhost:8000').strip().rstrip('/')
+_parsed_site_url = urlparse(
+    _raw_site_url if '://' in _raw_site_url else f'http://{_raw_site_url}'
+)
+if _parsed_site_url.scheme and _parsed_site_url.hostname:
+    SITE_PROTOCOL = _parsed_site_url.scheme
+    SITE_DOMAIN = _parsed_site_url.netloc
+    SITE_URL = f'{SITE_PROTOCOL}://{SITE_DOMAIN}'
+else:
+    SITE_PROTOCOL = 'http'
+    SITE_DOMAIN = 'localhost:8000'
+    SITE_URL = f'{SITE_PROTOCOL}://{SITE_DOMAIN}'
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
