@@ -5,6 +5,7 @@ import string
 from django.conf import settings
 from django.contrib.auth import authenticate
 from django.core.mail import send_mail
+from django.db import transaction
 from rest_framework import generics, permissions, status, viewsets
 from rest_framework.authtoken.models import Token
 from rest_framework.decorators import api_view, permission_classes
@@ -107,20 +108,32 @@ class CrearMonitorView(generics.CreateAPIView):
         # Password: si admin la provee usa esa, sino genera una temporal
         temp_password = (request.data.get('password') or '').strip() or _generate_temp_password()
 
-        monitor = Usuario.objects.create_user(
-            username=data['email'],
-            email=data['email'],
-            cedula=data['cedula'],
-            first_name=data['first_name'],
-            last_name=data['last_name'],
-            telefono=data.get('telefono', ''),
-            rol=Usuario.MONITOR,
-            password=temp_password,
-        )
+        # Usamos el patron de seed_demo (set_password despues de crear) en una
+        # transaccion atomica para evitar usuarios huerfanos si algo falla.
+        try:
+            with transaction.atomic():
+                monitor = Usuario.objects.create_user(
+                    username=data['email'],
+                    email=data['email'],
+                    password=None,
+                    cedula=data['cedula'],
+                    first_name=data.get('first_name', ''),
+                    last_name=data.get('last_name', ''),
+                    telefono=data.get('telefono', ''),
+                    rol=Usuario.MONITOR,
+                    is_active=True,
+                )
+                monitor.set_password(temp_password)
+                monitor.save(update_fields=['password'])
+        except Exception as exc:
+            logger.exception("Error creando monitor con email %s", data.get('email'))
+            return Response(
+                {'error': 'No se pudo crear el monitor.', 'detail': f'{type(exc).__name__}: {exc}'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
 
-        # Best-effort: intenta mandar correo con la password temporal,
-        # pero si falla (SMTP no configurado / dominio invalido) seguimos
-        # adelante y dejamos que admin entregue la password manualmente.
+        # Best-effort: intenta mandar correo con la password temporal.
+        # No bloquea la respuesta si SMTP no esta configurado.
         try:
             site_url = getattr(settings, 'SITE_URL', '').rstrip('/')
             text_message = (
