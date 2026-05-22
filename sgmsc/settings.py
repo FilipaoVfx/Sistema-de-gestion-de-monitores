@@ -29,7 +29,6 @@ INSTALLED_APPS = [
     'semestres',
     'asignaciones',
     'cambios',
-    'monitores',
     'django.contrib.admin',
     'django.contrib.auth',
     'django.contrib.contenttypes',
