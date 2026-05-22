@@ -30,8 +30,6 @@ INSTALLED_APPS = [
     'asignaciones',
     'cambios',
     'monitores',
-    'rest_framework',
-    'corsheaders',
     'django.contrib.admin',
     'django.contrib.auth',
     'django.contrib.contenttypes',
