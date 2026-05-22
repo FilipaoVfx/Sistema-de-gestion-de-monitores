@@ -1,7 +1,7 @@
-from django.urls import path
+from rest_framework.routers import DefaultRouter
 from . import views
 
-urlpatterns = [
-    path("",               views.salas,        name="salas"),
-    path("<int:id_sala>/", views.sala_detalle,  name="sala-detalle"),
-]
+router = DefaultRouter()
+router.register(r'salas', views.SalaViewSet, basename='sala')
+
+urlpatterns = router.urls

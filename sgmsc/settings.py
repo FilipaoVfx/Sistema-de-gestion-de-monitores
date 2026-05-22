@@ -29,8 +29,8 @@ INSTALLED_APPS = [
     'semestres',
     'asignaciones',
     'cambios',
-    'monitores',
     'rest_framework',
+    'rest_framework.authtoken',
     'corsheaders',
     'django.contrib.admin',
     'django.contrib.auth',
@@ -46,10 +46,21 @@ AUTH_USER_MODEL = 'usuarios.Usuario'
 # CORS — permitir frontend en desarrollo y producción
 CORS_ALLOWED_ORIGINS = os.environ.get(
     "CORS_ALLOWED_ORIGINS",
-    "http://localhost:5173,http://localhost:3000",
+    "http://localhost:5173,http://localhost:3000,https://sgmsc-frontend.vercel.app",
 ).split(",")
-LOGIN_URL = 'login'
+CORS_ALLOW_CREDENTIALS = True
 PASSWORD_RESET_TIMEOUT = 3600
+
+REST_FRAMEWORK = {
+    'DEFAULT_AUTHENTICATION_CLASSES': [
+        'rest_framework.authentication.TokenAuthentication',
+    ],
+    'DEFAULT_PERMISSION_CLASSES': [
+        'rest_framework.permissions.IsAuthenticated',
+    ],
+    'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.PageNumberPagination',
+    'PAGE_SIZE': 50,
+}
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',

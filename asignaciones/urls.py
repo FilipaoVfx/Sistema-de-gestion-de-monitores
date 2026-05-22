@@ -1,7 +1,7 @@
-from django.urls import path
-
+from rest_framework.routers import DefaultRouter
 from . import views
 
-urlpatterns = [
-	path("crear/", views.crear_asignacion_view, name="crear_asignacion"),
-]
+router = DefaultRouter()
+router.register(r'asignaciones', views.AsignacionViewSet, basename='asignacion')
+
+urlpatterns = router.urls
