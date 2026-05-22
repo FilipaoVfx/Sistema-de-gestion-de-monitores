@@ -42,10 +42,14 @@ class SolicitudCambio(models.Model):
 		on_delete=models.PROTECT,
 		related_name="solicitudes_cambio",
 	)
-	# Monitor que cubrirá el turno (obligatorio por RF-06)
+	# Monitor que cubrirá el turno. Nullable: el monitor solicita sin elegir
+	# reemplazo; el admin asigna al aprobar (los monitores no tienen acceso a
+	# la lista completa de usuarios para elegir).
 	monitor_reemplazo = models.ForeignKey(
 		settings.AUTH_USER_MODEL,
 		on_delete=models.PROTECT,
+		null=True,
+		blank=True,
 		related_name="solicitudes_reemplazo",
 	)
 	# Para extensibilidad futura: tipo de solicitud (por ahora solo cambio_turno)

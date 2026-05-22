@@ -11,13 +11,17 @@ from asignaciones.models import Asignacion
 from .models import SolicitudCambio
 
 
-def crear_solicitud_cambio(*, asignacion, solicitante, monitor_reemplazo, motivo="") -> SolicitudCambio:
+def crear_solicitud_cambio(*, asignacion, solicitante, monitor_reemplazo=None, motivo="") -> SolicitudCambio:
 	"""Crea una nueva solicitud de cambio de turno.
+
+	El monitor solo necesita pasar `asignacion` + `motivo`; el reemplazo
+	queda pendiente y lo asigna el admin al aprobar.
 
 	Args:
 		asignacion: Asignación del turno que no se podrá asistir.
 		solicitante: Usuario que solicita el cambio (debe ser el dueño).
-		monitor_reemplazo: Usuario que cubrirá el turno.
+		monitor_reemplazo: Opcional. Si se pasa al crear, queda registrado;
+			si no, se setea al aprobar.
 		motivo: Razón del cambio.
 
 	Returns:
@@ -37,7 +41,7 @@ def crear_solicitud_cambio(*, asignacion, solicitante, monitor_reemplazo, motivo
 	return solicitud
 
 
-def aprobar_solicitud(*, solicitud: SolicitudCambio, admin, respuesta=None) -> SolicitudCambio:
+def aprobar_solicitud(*, solicitud: SolicitudCambio, admin, monitor_reemplazo=None, respuesta=None) -> SolicitudCambio:
 	"""Aprueba una solicitud de cambio de turno.
 
 	Al aprobar, se actualiza la asignación original para que el monitor
@@ -47,19 +51,40 @@ def aprobar_solicitud(*, solicitud: SolicitudCambio, admin, respuesta=None) -> S
 	Args:
 		solicitud: Solicitud a aprobar.
 		admin: Usuario administrador que aprueba.
+		monitor_reemplazo: Monitor que cubrira el turno. Obligatorio si la
+			solicitud no tenia uno asignado. Si se pasa, sobrescribe el
+			actual.
 		respuesta: Mensaje opcional de respuesta.
 
 	Returns:
 		La solicitud actualizada.
 
 	Raises:
-		ValidationError: Si la solicitud ya fue respondida o hay conflictos.
+		ValidationError: Si la solicitud ya fue respondida, no hay reemplazo,
+			el reemplazo no es valido (mismo solicitante, no monitor) o tiene
+			conflicto de horario.
 	"""
 	if solicitud.estado != SolicitudCambio.PENDIENTE:
 		raise ValidationError("La solicitud ya fue respondida.")
 
 	asignacion = solicitud.asignacion
-	reemplazo = solicitud.monitor_reemplazo
+
+	# Resolver el reemplazo: el del argumento gana sobre el guardado
+	reemplazo = monitor_reemplazo or solicitud.monitor_reemplazo
+	if reemplazo is None:
+		raise ValidationError(
+			"Para aprobar la solicitud debe asignarse un monitor de reemplazo."
+		)
+
+	# El reemplazo no puede ser el mismo solicitante
+	if reemplazo.pk == solicitud.solicitante_id:
+		raise ValidationError(
+			"El monitor de reemplazo no puede ser el mismo que el solicitante."
+		)
+
+	# El reemplazo debe tener rol monitor
+	if getattr(reemplazo, "rol", None) != "monitor":
+		raise ValidationError("El reemplazo debe tener rol Monitor.")
 
 	# Verificar que el reemplazo no tenga conflicto de horario al momento de aprobar
 	conflicto = Asignacion.objects.filter(
@@ -75,6 +100,9 @@ def aprobar_solicitud(*, solicitud: SolicitudCambio, admin, respuesta=None) -> S
 		)
 
 	with transaction.atomic():
+		# Setear el reemplazo en la solicitud (si vino del argumento)
+		solicitud.monitor_reemplazo = reemplazo
+
 		# Actualizar el monitor de la asignación al reemplazo
 		asignacion.monitor = reemplazo
 		asignacion.save()
