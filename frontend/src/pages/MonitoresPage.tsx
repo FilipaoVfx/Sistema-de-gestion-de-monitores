@@ -10,7 +10,7 @@ import Spinner from '../components/ui/Spinner'
 import ErrorMessage from '../components/ui/ErrorMessage'
 import EmptyState from '../components/ui/EmptyState'
 import Badge from '../components/ui/Badge'
-import { Monitor as MonitorIcon, Plus } from 'lucide-react'
+import { Monitor as MonitorIcon, Plus, Copy, KeyRound, CheckCheck } from 'lucide-react'
 
 export default function MonitoresPage() {
   const { user } = useAuth()
@@ -25,6 +25,20 @@ export default function MonitoresPage() {
     email: '', first_name: '', last_name: '', cedula: '', telefono: '',
   })
   const [saving, setSaving] = useState(false)
+
+  // Modal de exito mostrando la password temporal del monitor recien creado
+  const [credentialsModal, setCredentialsModal] = useState<{ email: string; password: string } | null>(null)
+  const [copied, setCopied] = useState<'none' | 'email' | 'password' | 'both'>('none')
+
+  const copyToClipboard = async (text: string, label: 'email' | 'password' | 'both') => {
+    try {
+      await navigator.clipboard.writeText(text)
+      setCopied(label)
+      setTimeout(() => setCopied('none'), 1500)
+    } catch {
+      showToast('No se pudo copiar al portapapeles', 'error')
+    }
+  }
 
   const load = () => {
     setLoading(true)
@@ -41,11 +55,14 @@ export default function MonitoresPage() {
     if (!form.email || !form.first_name || !form.last_name || !form.cedula) return
     setSaving(true)
     try {
-      await monitoresApi.create(form)
+      const res = await monitoresApi.create(form)
       showToast('Monitor creado')
       setModalOpen(false)
       setForm({ email: '', first_name: '', last_name: '', cedula: '', telefono: '' })
       load()
+      if (res.data.temporary_password) {
+        setCredentialsModal({ email: res.data.email, password: res.data.temporary_password })
+      }
     } catch {
       showToast('Error al crear monitor', 'error')
     } finally {
@@ -136,6 +153,73 @@ export default function MonitoresPage() {
             </label>
           ))}
         </div>
+      </Modal>
+
+      {/* Modal de credenciales temporales (se muestra una sola vez al crear) */}
+      <Modal
+        open={credentialsModal !== null}
+        onClose={() => setCredentialsModal(null)}
+        title="Monitor creado — credenciales temporales"
+        footer={
+          <Button
+            onClick={() =>
+              credentialsModal && copyToClipboard(
+                `Email: ${credentialsModal.email}\nPassword: ${credentialsModal.password}`,
+                'both',
+              )
+            }
+          >
+            {copied === 'both' ? <><CheckCheck className="w-4 h-4" /> Copiado</> : <><Copy className="w-4 h-4" /> Copiar ambos</>}
+          </Button>
+        }
+      >
+        {credentialsModal && (
+          <div className="space-y-4">
+            <div className="flex items-start gap-3 bg-amber-50 border border-amber-200 rounded-lg p-3">
+              <KeyRound className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+              <p className="text-sm text-amber-800 leading-relaxed">
+                Guarda esta contraseña — solo se muestra una vez. Entrégala al monitor por
+                un canal seguro (WhatsApp, Slack, etc). El monitor podrá cambiarla luego.
+              </p>
+            </div>
+
+            <div className="space-y-2">
+              <label className="block">
+                <span className="text-xs font-medium text-textMuted uppercase tracking-wide">Email</span>
+                <div className="mt-1 flex items-center gap-2">
+                  <code className="flex-1 font-mono text-sm bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-textMain">
+                    {credentialsModal.email}
+                  </code>
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => copyToClipboard(credentialsModal.email, 'email')}
+                    title="Copiar email"
+                  >
+                    {copied === 'email' ? <CheckCheck className="w-4 h-4 text-success" /> : <Copy className="w-4 h-4" />}
+                  </Button>
+                </div>
+              </label>
+
+              <label className="block">
+                <span className="text-xs font-medium text-textMuted uppercase tracking-wide">Password temporal</span>
+                <div className="mt-1 flex items-center gap-2">
+                  <code className="flex-1 font-mono text-sm bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-textMain select-all">
+                    {credentialsModal.password}
+                  </code>
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => copyToClipboard(credentialsModal.password, 'password')}
+                    title="Copiar password"
+                  >
+                    {copied === 'password' ? <CheckCheck className="w-4 h-4 text-success" /> : <Copy className="w-4 h-4" />}
+                  </Button>
+                </div>
+              </label>
+            </div>
+          </div>
+        )}
       </Modal>
     </div>
   )
