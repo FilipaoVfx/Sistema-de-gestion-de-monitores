@@ -1,13 +1,10 @@
 import logging
+import secrets
+import string
 
 from django.conf import settings
 from django.contrib.auth import authenticate
-from django.contrib.auth.tokens import PasswordResetTokenGenerator
 from django.core.mail import send_mail
-from django.template.loader import render_to_string
-from django.urls import reverse
-from django.utils.encoding import force_bytes
-from django.utils.http import urlsafe_base64_encode
 from rest_framework import generics, permissions, status, viewsets
 from rest_framework.authtoken.models import Token
 from rest_framework.decorators import api_view, permission_classes
@@ -16,6 +13,12 @@ from asgiref.sync import async_to_sync
 
 from .models import Usuario
 from .serializers import CrearMonitorSerializer, LoginSerializer, UsuarioSerializer
+
+
+def _generate_temp_password(length: int = 10) -> str:
+    """Genera una password temporal aleatoria (letras + dígitos)."""
+    alphabet = string.ascii_letters + string.digits
+    return ''.join(secrets.choice(alphabet) for _ in range(length))
 
 logger = logging.getLogger(__name__)
 
@@ -80,7 +83,16 @@ class UsuarioViewSet(viewsets.ReadOnlyModelViewSet):
 
 
 class CrearMonitorView(generics.CreateAPIView):
-    """POST /api/usuarios/monitores/  →  crea monitor y envía correo de activación"""
+    """POST /api/usuarios/monitores/
+
+    Crea un monitor con una password temporal autogenerada y la retorna
+    en la respuesta (campo `temporary_password`). El admin debe entregarla
+    al monitor por un canal seguro (Slack/WhatsApp/etc); el monitor podra
+    cambiarla luego desde su perfil.
+
+    Adicionalmente intenta enviar un correo de bienvenida con la password
+    temporal, pero el endpoint no falla si SMTP no esta configurado.
+    """
     serializer_class = CrearMonitorSerializer
     permission_classes = [permissions.IsAuthenticated]
 
@@ -92,6 +104,9 @@ class CrearMonitorView(generics.CreateAPIView):
         serializer.is_valid(raise_exception=True)
         data = serializer.validated_data
 
+        # Password: si admin la provee usa esa, sino genera una temporal
+        temp_password = (request.data.get('password') or '').strip() or _generate_temp_password()
+
         monitor = Usuario.objects.create_user(
             username=data['email'],
             email=data['email'],
@@ -100,48 +115,35 @@ class CrearMonitorView(generics.CreateAPIView):
             last_name=data['last_name'],
             telefono=data.get('telefono', ''),
             rol=Usuario.MONITOR,
-            password=None,
+            password=temp_password,
         )
 
-        # Generate password reset link for first-time activation
-        token_generator = PasswordResetTokenGenerator()
-        uid = urlsafe_base64_encode(force_bytes(monitor.pk))
-        token = token_generator.make_token(monitor)
-        reset_path = reverse('password_reset_confirm', kwargs={'uidb64': uid, 'token': token})
-        site_url = settings.SITE_URL.rstrip('/')
-        reset_url = f"{site_url}{reset_path}"
-
-        html_message = render_to_string(
-            'emails/bienvenida_monitor.html',
-            {'first_name': monitor.first_name, 'email': monitor.email, 'reset_url': reset_url},
-        )
-        text_message = (
-            f"Hola {monitor.first_name},\n\n"
-            "Tu cuenta de monitor fue creada.\n"
-            f"Usuario: {monitor.email}\n\n"
-            "Para establecer tu contraseña, visita el siguiente enlace:\n"
-            f"{reset_url}\n\n"
-            "El enlace expirará en 1 hora."
-        )
-
+        # Best-effort: intenta mandar correo con la password temporal,
+        # pero si falla (SMTP no configurado / dominio invalido) seguimos
+        # adelante y dejamos que admin entregue la password manualmente.
         try:
+            site_url = getattr(settings, 'SITE_URL', '').rstrip('/')
+            text_message = (
+                f"Hola {monitor.first_name},\n\n"
+                "Tu cuenta de monitor fue creada en SGMSC.\n"
+                f"Usuario: {monitor.email}\n"
+                f"Contrasena temporal: {temp_password}\n\n"
+                "Por seguridad, cambia tu contrasena al iniciar sesion."
+                + (f"\nLogin: {site_url}/usuarios/login/" if site_url else "")
+            )
             send_mail(
-                "Bienvenido al SGM SC - Establece tu contraseña",
+                "Bienvenido al SGMSC - Tu contrasena temporal",
                 text_message,
-                settings.EMAIL_HOST_USER,
+                getattr(settings, 'EMAIL_HOST_USER', None) or 'no-reply@sgmsc.local',
                 [monitor.email],
-                html_message=html_message,
-                fail_silently=False,
+                fail_silently=True,
             )
         except Exception:
-            logger.exception("Error enviando correo de activación para %s", monitor.email)
-            monitor.delete()
-            return Response(
-                {'error': 'No se pudo enviar el correo de activación. El monitor no fue creado.'},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            )
+            logger.exception("Error enviando correo de bienvenida para %s", monitor.email)
 
-        return Response(UsuarioSerializer(monitor).data, status=status.HTTP_201_CREATED)
+        payload = UsuarioSerializer(monitor).data
+        payload['temporary_password'] = temp_password
+        return Response(payload, status=status.HTTP_201_CREATED)
 
 
 # ---------------------------------------------------------------------------
