@@ -29,9 +29,20 @@ api.interceptors.request.use((config) => {
   return config
 })
 
-// Limpia el token si el servidor responde 401
+// Desempaqueta respuestas paginadas de DRF ({count, next, previous, results: []})
+// para que las páginas puedan usar .map() directamente sobre r.data.
+// Limpia el token si el servidor responde 401.
 api.interceptors.response.use(
-  (res) => res,
+  (res) => {
+    const d = res.data
+    if (
+      d && typeof d === 'object' && !Array.isArray(d)
+      && Array.isArray(d.results) && typeof d.count === 'number'
+    ) {
+      res.data = d.results
+    }
+    return res
+  },
   (err) => {
     if (err.response?.status === 401) {
       localStorage.removeItem('auth_token')
