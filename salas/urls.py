@@ -1,7 +1,7 @@
-from rest_framework.routers import DefaultRouter
+from rest_framework.routers import SimpleRouter
 from . import views
 
-router = DefaultRouter()
+router = SimpleRouter()
 router.register(r'salas', views.SalaViewSet, basename='sala')
 
 urlpatterns = router.urls

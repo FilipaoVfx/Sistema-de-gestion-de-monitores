@@ -1,10 +1,10 @@
 from django.contrib.auth import views as auth_views
 from django.urls import path
-from rest_framework.routers import DefaultRouter
+from rest_framework.routers import SimpleRouter
 
 from . import views
 
-router = DefaultRouter()
+router = SimpleRouter()
 router.register(r'usuarios', views.UsuarioViewSet, basename='usuario')
 
 urlpatterns = [

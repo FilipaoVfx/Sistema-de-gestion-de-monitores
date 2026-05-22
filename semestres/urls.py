@@ -1,7 +1,7 @@
-from rest_framework.routers import DefaultRouter
+from rest_framework.routers import SimpleRouter
 from . import views
 
-router = DefaultRouter()
+router = SimpleRouter()
 router.register(r'semestres', views.SemestreViewSet, basename='semestre')
 
 urlpatterns = router.urls
