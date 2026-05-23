@@ -1,8 +1,6 @@
 import { useEffect, useState } from 'react'
 import { cambiosApi, type SolicitudCambio } from '../api/cambios.api'
 import { asignacionesApi, type Asignacion } from '../api/asignaciones.api'
-import { monitoresApi } from '../api/monitores.api'
-import type { SessionUser } from '../api/auth.api'
 import { useAuth } from '../context/AuthContext'
 import { useToast } from '../components/ui/Toast'
 import Card from '../components/ui/Card'
@@ -12,14 +10,23 @@ import Badge from '../components/ui/Badge'
 import Spinner from '../components/ui/Spinner'
 import ErrorMessage from '../components/ui/ErrorMessage'
 import EmptyState from '../components/ui/EmptyState'
-import { ArrowLeftRight, Plus, CheckCircle, XCircle } from 'lucide-react'
+import UserAvatar from '../components/ui/UserAvatar'
+import { ArrowLeftRight, Plus, CheckCircle, XCircle, Lightbulb, Sparkles } from 'lucide-react'
 import { formatDate, formatTime } from '../utils/formatDate'
 import type { StatusColor } from '../utils/statusMapper'
 
 const estadoVariant: Record<string, StatusColor> = {
-  pendiente: 'yellow',
-  aprobada:  'green',
-  rechazada: 'red',
+  pendiente:      'yellow',
+  con_propuestas: 'blue',
+  aprobada:       'green',
+  rechazada:      'red',
+}
+
+const estadoLabel: Record<string, string> = {
+  pendiente:      'Pendiente',
+  con_propuestas: 'Con propuestas',
+  aprobada:       'Aprobada',
+  rechazada:      'Rechazada',
 }
 
 export default function SolicitudesCambioPage() {
@@ -27,25 +34,37 @@ export default function SolicitudesCambioPage() {
   const { showToast } = useToast()
   const isAdmin = user?.rol === 'admin'
 
-  const [solicitudes, setSolicitudes]  = useState<SolicitudCambio[]>([])
+  const [solicitudes,  setSolicitudes]  = useState<SolicitudCambio[]>([])
   const [filterEstado, setFilterEstado] = useState<string>('')
-  const [loading,  setLoading]  = useState(true)
-  const [error,    setError]    = useState(false)
+  const [loading,      setLoading]      = useState(true)
+  const [error,        setError]        = useState(false)
 
-  // Create modal (monitor): solo asignacion + motivo. El admin elige reemplazo.
+  // Crear solicitud (monitor)
   const [createOpen, setCreateOpen] = useState(false)
   const [misAsignaciones, setMisAsignaciones] = useState<Asignacion[]>([])
   const [createForm, setCreateForm] = useState({ asignacion: '', motivo: '' })
   const [creating, setCreating] = useState(false)
 
-  // Respond modal (admin): elige monitor reemplazo al aprobar.
-  const [respondOpen,   setRespondOpen]   = useState(false)
-  const [respondTarget, setRespondTarget] = useState<SolicitudCambio | null>(null)
-  const [respondForm,   setRespondForm]   = useState({
-    estado: 'aprobada', monitor_reemplazo: '', respuesta: '',
-  })
-  const [responding,    setResponding]    = useState(false)
-  const [monitores,     setMonitores]     = useState<SessionUser[]>([])
+  // Proponer opciones (admin)
+  const [proposeOpen, setProposeOpen]   = useState(false)
+  const [proposeTarget, setProposeTarget] = useState<SolicitudCambio | null>(null)
+  const [candidatos, setCandidatos] = useState<Asignacion[]>([])
+  const [loadingCand, setLoadingCand] = useState(false)
+  const [seleccionadas, setSeleccionadas] = useState<number[]>([])
+  const [proposeResp, setProposeResp] = useState('')
+  const [proposing, setProposing] = useState(false)
+
+  // Elegir opcion (monitor)
+  const [chooseOpen, setChooseOpen] = useState(false)
+  const [chooseTarget, setChooseTarget] = useState<SolicitudCambio | null>(null)
+  const [chosen, setChosen] = useState<number | null>(null)
+  const [choosing, setChoosing] = useState(false)
+
+  // Rechazar (admin)
+  const [rejectOpen,  setRejectOpen]   = useState(false)
+  const [rejectTarget,setRejectTarget] = useState<SolicitudCambio | null>(null)
+  const [rejectMsg,   setRejectMsg]    = useState('')
+  const [rejecting,   setRejecting]    = useState(false)
 
   const load = () => {
     setLoading(true)
@@ -58,6 +77,7 @@ export default function SolicitudesCambioPage() {
 
   useEffect(() => { load() }, [filterEstado])
 
+  // ---- Crear (monitor) ----
   const openCreate = async () => {
     setCreateForm({ asignacion: '', motivo: '' })
     setCreateOpen(true)
@@ -77,58 +97,110 @@ export default function SolicitudesCambioPage() {
         asignacion: Number(createForm.asignacion),
         motivo:     createForm.motivo || undefined,
       })
-      showToast('Solicitud enviada — el admin asignará el reemplazo')
+      showToast('Solicitud enviada — el admin propondra opciones de cambio')
       setCreateOpen(false)
       load()
-    } catch {
-      showToast('Error al enviar solicitud', 'error')
+    } catch (e: any) {
+      showToast(e?.response?.data?.error || 'Error al enviar solicitud', 'error')
     } finally {
       setCreating(false)
     }
   }
 
-  const openRespond = async (s: SolicitudCambio) => {
-    setRespondTarget(s)
-    setRespondForm({ estado: 'aprobada', monitor_reemplazo: '', respuesta: '' })
-    setRespondOpen(true)
-    // Cargar lista de monitores (excluyendo al solicitante) para el dropdown
+  // ---- Proponer (admin) ----
+  const openPropose = async (s: SolicitudCambio) => {
+    setProposeTarget(s)
+    setSeleccionadas([])
+    setProposeResp('')
+    setProposeOpen(true)
+    setLoadingCand(true)
     try {
-      const m = await monitoresApi.list()
-      setMonitores(m.data.filter(u => u.rol === 'monitor' && u.id !== s.solicitante))
+      const r = await cambiosApi.candidatos(s.id_cambio)
+      setCandidatos(r.data)
     } catch {
-      showToast('Error al cargar monitores', 'error')
+      showToast('Error al cargar candidatos', 'error')
+      setCandidatos([])
+    } finally {
+      setLoadingCand(false)
     }
   }
 
-  const handleRespond = async () => {
-    if (!respondTarget) return
-    // Si va a aprobar, requiere reemplazo
-    if (respondForm.estado === 'aprobada' && !respondForm.monitor_reemplazo) {
-      showToast('Selecciona un monitor reemplazo para aprobar', 'error')
-      return
-    }
-    setResponding(true)
+  const toggleCandidato = (id: number) => {
+    setSeleccionadas(prev =>
+      prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]
+    )
+  }
+
+  const handlePropose = async () => {
+    if (!proposeTarget || seleccionadas.length < 2) return
+    setProposing(true)
     try {
-      await cambiosApi.responder(respondTarget.id_cambio, {
-        estado:            respondForm.estado as 'aprobada' | 'rechazada',
-        monitor_reemplazo: respondForm.estado === 'aprobada' && respondForm.monitor_reemplazo
-                             ? Number(respondForm.monitor_reemplazo)
-                             : undefined,
-        respuesta:         respondForm.respuesta || undefined,
+      await cambiosApi.proponer(proposeTarget.id_cambio, {
+        opciones: seleccionadas,
+        respuesta: proposeResp || undefined,
       })
-      showToast(`Solicitud ${respondForm.estado === 'aprobada' ? 'aprobada' : 'rechazada'}`)
-      setRespondOpen(false)
+      showToast(`${seleccionadas.length} opciones enviadas al monitor`)
+      setProposeOpen(false)
       load()
-    } catch (err: any) {
-      const msg = err?.response?.data?.error || 'Error al responder solicitud'
-      showToast(msg, 'error')
+    } catch (e: any) {
+      showToast(e?.response?.data?.error || 'Error al proponer opciones', 'error')
     } finally {
-      setResponding(false)
+      setProposing(false)
+    }
+  }
+
+  // ---- Elegir (monitor) ----
+  const openChoose = (s: SolicitudCambio) => {
+    setChooseTarget(s)
+    setChosen(null)
+    setChooseOpen(true)
+  }
+
+  const handleChoose = async () => {
+    if (!chooseTarget || chosen === null) return
+    setChoosing(true)
+    try {
+      await cambiosApi.elegir(chooseTarget.id_cambio, { opcion: chosen })
+      showToast('Swap ejecutado — tu turno ha sido intercambiado')
+      setChooseOpen(false)
+      load()
+    } catch (e: any) {
+      showToast(e?.response?.data?.error || 'Error al ejecutar swap', 'error')
+    } finally {
+      setChoosing(false)
+    }
+  }
+
+  // ---- Rechazar (admin) ----
+  const openReject = (s: SolicitudCambio) => {
+    setRejectTarget(s)
+    setRejectMsg('')
+    setRejectOpen(true)
+  }
+
+  const handleReject = async () => {
+    if (!rejectTarget) return
+    setRejecting(true)
+    try {
+      await cambiosApi.rechazar(rejectTarget.id_cambio, { respuesta: rejectMsg || undefined })
+      showToast('Solicitud rechazada')
+      setRejectOpen(false)
+      load()
+    } catch (e: any) {
+      showToast(e?.response?.data?.error || 'Error al rechazar', 'error')
+    } finally {
+      setRejecting(false)
     }
   }
 
   const asigLabel = (a: Asignacion) =>
     `${a.sala_codigo} · ${a.dia_semana_display} · ${formatTime(a.hora_inicio)}–${formatTime(a.hora_fin)} (${a.semestre_label})`
+
+  // Agrupa candidatos por monitor para el modal de proponer
+  const candidatosPorMonitor = candidatos.reduce<Record<number, Asignacion[]>>((acc, a) => {
+    (acc[a.monitor] ||= []).push(a)
+    return acc
+  }, {})
 
   return (
     <div className="space-y-6">
@@ -137,7 +209,9 @@ export default function SolicitudesCambioPage() {
           <h1 className="text-2xl font-bold text-textMain flex items-center gap-2">
             <ArrowLeftRight className="w-6 h-6 text-primary" /> Solicitudes de cambio
           </h1>
-          <p className="text-sm text-textMuted mt-1">Peticiones de intercambio de turnos entre monitores</p>
+          <p className="text-sm text-textMuted mt-1">
+            Monitor solicita · Admin propone opciones · Monitor elige cual swap aceptar
+          </p>
         </div>
         {!isAdmin && (
           <Button onClick={openCreate}>
@@ -155,6 +229,7 @@ export default function SolicitudesCambioPage() {
         >
           <option value="">Todos</option>
           <option value="pendiente">Pendiente</option>
+          <option value="con_propuestas">Con propuestas</option>
           <option value="aprobada">Aprobada</option>
           <option value="rechazada">Rechazada</option>
         </select>
@@ -172,53 +247,92 @@ export default function SolicitudesCambioPage() {
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-gray-100">
-                  {['Solicitante', 'Reemplazo', 'Turno', 'Motivo', 'Estado', 'Fecha', ...(isAdmin ? [''] : [])].map((h, i) => (
-                    <th key={i} className={`px-6 py-3 ${i === 6 ? 'text-right' : 'text-left'} text-xs font-medium text-textMuted uppercase tracking-wide`}>{h}</th>
+                  {['Solicitante', 'Turno', 'Estado', 'Opciones', 'Motivo', 'Fecha', 'Accion'].map((h, i) => (
+                    <th key={i} className={`px-4 py-3 ${i === 6 ? 'text-right' : 'text-left'} text-xs font-medium text-textMuted uppercase tracking-wide`}>{h}</th>
                   ))}
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-50">
-                {solicitudes.map(s => (
-                  <tr key={s.id_cambio} className="hover:bg-gray-50/50">
-                    <td className="px-6 py-3 font-medium text-textMain">{s.solicitante_nombre}</td>
-                    <td className="px-6 py-3 text-textMuted">
-                      {s.monitor_reemplazo_nombre ?? (
-                        <span className="italic text-gray-400">Pendiente de asignación</span>
-                      )}
-                    </td>
-                    <td className="px-6 py-3 text-textMuted text-xs">
-                      {s.asignacion_detalle
-                        ? `${s.asignacion_detalle.sala} · ${s.asignacion_detalle.dia} · ${formatTime(s.asignacion_detalle.hora_inicio)}–${formatTime(s.asignacion_detalle.hora_fin)}`
-                        : `#${s.asignacion}`
-                      }
-                    </td>
-                    <td className="px-6 py-3 text-textMuted max-w-xs truncate">{s.motivo || '—'}</td>
-                    <td className="px-6 py-3">
-                      <Badge variant={estadoVariant[s.estado] ?? 'gray'}>
-                        {s.estado.charAt(0).toUpperCase() + s.estado.slice(1)}
-                      </Badge>
-                    </td>
-                    <td className="px-6 py-3 text-textMuted">{formatDate(s.fecha_creacion)}</td>
-                    {isAdmin && (
-                      <td className="px-6 py-3 text-right">
-                        {s.estado === 'pendiente' && (
-                          <div className="flex justify-end gap-1">
-                            <Button variant="ghost" size="sm" onClick={() => openRespond(s)} title="Aprobar / Rechazar">
-                              <CheckCircle className="w-4 h-4 text-success" />
-                            </Button>
+                {solicitudes.map(s => {
+                  const esMiSolicitud = s.solicitante === user?.id
+                  return (
+                    <tr key={s.id_cambio} className="hover:bg-gray-50/50">
+                      <td className="px-4 py-3">
+                        <div className="flex items-center gap-2">
+                          <UserAvatar userId={s.solicitante} name={s.solicitante_nombre} size="sm" />
+                          <span className="font-medium text-textMain">{s.solicitante_nombre}</span>
+                        </div>
+                      </td>
+                      <td className="px-4 py-3 text-textMuted text-xs">
+                        {s.asignacion_detalle.sala_codigo} · {s.asignacion_detalle.dia} ·{' '}
+                        {formatTime(s.asignacion_detalle.hora_inicio)}–{formatTime(s.asignacion_detalle.hora_fin)}
+                      </td>
+                      <td className="px-4 py-3">
+                        <Badge variant={estadoVariant[s.estado] ?? 'gray'}>
+                          {estadoLabel[s.estado] ?? s.estado}
+                        </Badge>
+                      </td>
+                      <td className="px-4 py-3 text-textMuted text-xs">
+                        {s.estado === 'con_propuestas' && s.opciones.length > 0 ? (
+                          <div className="flex gap-1">
+                            {s.opciones.map(op => (
+                              <UserAvatar
+                                key={op.id_opcion}
+                                userId={op.asignacion_swap_detalle.id_asignacion}
+                                name={op.monitor_swap_nombre}
+                                size="xs"
+                                ringed
+                              />
+                            ))}
                           </div>
+                        ) : s.estado === 'aprobada' && s.monitor_reemplazo_nombre ? (
+                          <div className="flex items-center gap-1">
+                            <UserAvatar userId={s.monitor_reemplazo} name={s.monitor_reemplazo_nombre} size="xs" />
+                            <span>{s.monitor_reemplazo_nombre}</span>
+                          </div>
+                        ) : (
+                          <span className="italic text-gray-400">—</span>
                         )}
                       </td>
-                    )}
-                  </tr>
-                ))}
+                      <td className="px-4 py-3 text-textMuted max-w-xs truncate">{s.motivo || '—'}</td>
+                      <td className="px-4 py-3 text-textMuted text-xs">{formatDate(s.fecha_creacion)}</td>
+                      <td className="px-4 py-3 text-right">
+                        <div className="flex justify-end gap-1">
+                          {/* Admin: proponer o rechazar mientras este pendiente */}
+                          {isAdmin && s.estado === 'pendiente' && (
+                            <>
+                              <Button variant="ghost" size="sm" onClick={() => openPropose(s)} title="Proponer opciones de cambio">
+                                <Lightbulb className="w-4 h-4 text-blue-600" />
+                              </Button>
+                              <Button variant="ghost" size="sm" onClick={() => openReject(s)} title="Rechazar">
+                                <XCircle className="w-4 h-4 text-danger" />
+                              </Button>
+                            </>
+                          )}
+                          {/* Admin: rechazar tambien si ya hay propuestas */}
+                          {isAdmin && s.estado === 'con_propuestas' && (
+                            <Button variant="ghost" size="sm" onClick={() => openReject(s)} title="Rechazar">
+                              <XCircle className="w-4 h-4 text-danger" />
+                            </Button>
+                          )}
+                          {/* Monitor solicitante: elegir opcion */}
+                          {!isAdmin && esMiSolicitud && s.estado === 'con_propuestas' && (
+                            <Button size="sm" onClick={() => openChoose(s)}>
+                              <Sparkles className="w-3.5 h-3.5" /> Elegir opcion
+                            </Button>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  )
+                })}
               </tbody>
             </table>
           </div>
         )}
       </Card>
 
-      {/* Monitor: create solicitud */}
+      {/* ============== MODAL: monitor crea solicitud ============== */}
       <Modal
         open={createOpen}
         onClose={() => setCreateOpen(false)}
@@ -244,13 +358,15 @@ export default function SolicitudesCambioPage() {
               ))}
             </select>
           </label>
+
           <div className="flex items-start gap-3 bg-blue-50 border border-blue-200 rounded-lg p-3">
             <ArrowLeftRight className="w-5 h-5 text-blue-600 shrink-0 mt-0.5" />
             <p className="text-sm text-blue-800 leading-relaxed">
-              El administrador asignará un monitor de reemplazo al aprobar tu solicitud.
-              No es necesario que indiques quién te cubrirá.
+              El administrador te propondra <strong>al menos 2 opciones</strong> de cambio
+              (swap con otros monitores). Tu decides cual swap aceptar.
             </p>
           </div>
+
           <label className="block">
             <span className="text-sm font-medium text-textMain">Motivo (opcional)</span>
             <textarea
@@ -264,98 +380,204 @@ export default function SolicitudesCambioPage() {
         </div>
       </Modal>
 
-      {/* Admin: respond to solicitud */}
+      {/* ============== MODAL: admin propone opciones ============== */}
       <Modal
-        open={respondOpen}
-        onClose={() => setRespondOpen(false)}
-        title="Responder solicitud"
+        open={proposeOpen}
+        onClose={() => setProposeOpen(false)}
+        title="Proponer opciones de cambio"
         footer={
           <>
-            <Button variant="secondary" onClick={() => setRespondOpen(false)}>Cancelar</Button>
-            <Button
-              variant={respondForm.estado === 'aprobada' ? 'primary' : 'danger'}
-              onClick={handleRespond}
-              disabled={responding}
-            >
-              {responding ? 'Guardando…' : respondForm.estado === 'aprobada' ? 'Aprobar' : 'Rechazar'}
+            <Button variant="secondary" onClick={() => setProposeOpen(false)}>Cancelar</Button>
+            <Button onClick={handlePropose} disabled={proposing || seleccionadas.length < 2}>
+              {proposing
+                ? 'Enviando…'
+                : seleccionadas.length < 2
+                  ? `Selecciona ${2 - seleccionadas.length} mas`
+                  : `Enviar ${seleccionadas.length} opciones`}
             </Button>
           </>
         }
       >
-        {respondTarget && (
+        {proposeTarget && (
           <div className="space-y-4">
             <div className="bg-gray-50 rounded-lg p-3 text-sm space-y-1">
-              <p><span className="font-medium">Solicitante:</span> {respondTarget.solicitante_nombre}</p>
-              <p>
-                <span className="font-medium">Turno:</span>{' '}
-                {respondTarget.asignacion_detalle
-                  ? `${respondTarget.asignacion_detalle.sala} · ${respondTarget.asignacion_detalle.dia} · ${formatTime(respondTarget.asignacion_detalle.hora_inicio)}–${formatTime(respondTarget.asignacion_detalle.hora_fin)}`
-                  : `#${respondTarget.asignacion}`}
-              </p>
-              {respondTarget.motivo && <p><span className="font-medium">Motivo:</span> {respondTarget.motivo}</p>}
-            </div>
-            <div>
-              <span className="text-sm font-medium text-textMain">Decisión</span>
-              <div className="mt-2 flex gap-3">
-                <label className="flex items-center gap-2 cursor-pointer">
-                  <input
-                    type="radio"
-                    name="estado"
-                    value="aprobada"
-                    checked={respondForm.estado === 'aprobada'}
-                    onChange={() => setRespondForm(f => ({ ...f, estado: 'aprobada' }))}
-                    className="text-success"
-                  />
-                  <CheckCircle className="w-4 h-4 text-success" />
-                  <span className="text-sm">Aprobar</span>
-                </label>
-                <label className="flex items-center gap-2 cursor-pointer">
-                  <input
-                    type="radio"
-                    name="estado"
-                    value="rechazada"
-                    checked={respondForm.estado === 'rechazada'}
-                    onChange={() => setRespondForm(f => ({ ...f, estado: 'rechazada' }))}
-                    className="text-danger"
-                  />
-                  <XCircle className="w-4 h-4 text-danger" />
-                  <span className="text-sm">Rechazar</span>
-                </label>
+              <div className="flex items-center gap-2">
+                <UserAvatar userId={proposeTarget.solicitante} name={proposeTarget.solicitante_nombre} size="sm" />
+                <span className="font-medium">{proposeTarget.solicitante_nombre}</span>
               </div>
+              <p className="text-textMuted">
+                <strong>Turno:</strong> {proposeTarget.asignacion_detalle.sala_codigo} · {proposeTarget.asignacion_detalle.dia} ·{' '}
+                {formatTime(proposeTarget.asignacion_detalle.hora_inicio)}–{formatTime(proposeTarget.asignacion_detalle.hora_fin)}
+              </p>
+              {proposeTarget.motivo && <p className="text-textMuted"><strong>Motivo:</strong> {proposeTarget.motivo}</p>}
             </div>
 
-            {/* Select de monitor reemplazo — solo al aprobar */}
-            {respondForm.estado === 'aprobada' && (
-              <label className="block">
-                <span className="text-sm font-medium text-textMain">
-                  Monitor de reemplazo <span className="text-danger">*</span>
-                </span>
-                <select
-                  className="mt-1 block w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
-                  value={respondForm.monitor_reemplazo}
-                  onChange={e => setRespondForm(f => ({ ...f, monitor_reemplazo: e.target.value }))}
-                >
-                  <option value="">Seleccionar monitor…</option>
-                  {monitores.map(m => (
-                    <option key={m.id} value={m.id}>
-                      {[m.first_name, m.last_name].filter(Boolean).join(' ') || m.email}
-                    </option>
-                  ))}
-                </select>
-                <span className="text-xs text-textMuted mt-1 block">
-                  El monitor que cubrirá el turno del solicitante.
-                </span>
-              </label>
+            <p className="text-sm text-textMain">
+              Selecciona <strong>al menos 2</strong> turnos de otros monitores para ofrecer
+              como opcion de swap. El solicitante elegira cual acepta.
+            </p>
+
+            {loadingCand ? (
+              <Spinner text="Cargando candidatos…" />
+            ) : Object.keys(candidatosPorMonitor).length === 0 ? (
+              <EmptyState
+                title="Sin candidatos"
+                description="No hay turnos disponibles para swap en este semestre."
+              />
+            ) : (
+              <div className="space-y-3 max-h-72 overflow-y-auto">
+                {Object.entries(candidatosPorMonitor).map(([monitorId, asignaciones]) => {
+                  const monitorIdNum = Number(monitorId)
+                  const nombre = asignaciones[0].monitor_nombre
+                  return (
+                    <div key={monitorId} className="border border-gray-100 rounded-lg p-3">
+                      <div className="flex items-center gap-2 mb-2">
+                        <UserAvatar userId={monitorIdNum} name={nombre} size="sm" />
+                        <span className="font-medium text-sm">{nombre}</span>
+                      </div>
+                      <div className="space-y-1 ml-2">
+                        {asignaciones.map(a => (
+                          <label key={a.id_asignacion} className="flex items-center gap-2 cursor-pointer p-1.5 rounded hover:bg-gray-50">
+                            <input
+                              type="checkbox"
+                              className="rounded border-gray-300 text-primary focus:ring-primary/30"
+                              checked={seleccionadas.includes(a.id_asignacion)}
+                              onChange={() => toggleCandidato(a.id_asignacion)}
+                            />
+                            <span className="text-xs text-textMuted">
+                              {a.sala_codigo} · {a.dia_semana_display} ·{' '}
+                              {formatTime(a.hora_inicio)}–{formatTime(a.hora_fin)}
+                            </span>
+                          </label>
+                        ))}
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
             )}
 
             <label className="block">
-              <span className="text-sm font-medium text-textMain">Respuesta (opcional)</span>
+              <span className="text-sm font-medium text-textMain">Mensaje al solicitante (opcional)</span>
+              <textarea
+                rows={2}
+                className="mt-1 block w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 resize-none"
+                placeholder="Notas para el monitor…"
+                value={proposeResp}
+                onChange={e => setProposeResp(e.target.value)}
+              />
+            </label>
+          </div>
+        )}
+      </Modal>
+
+      {/* ============== MODAL: monitor elige opcion ============== */}
+      <Modal
+        open={chooseOpen}
+        onClose={() => setChooseOpen(false)}
+        title="Elige tu cambio de turno"
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setChooseOpen(false)}>Cancelar</Button>
+            <Button onClick={handleChoose} disabled={choosing || chosen === null}>
+              {choosing ? 'Ejecutando swap…' : 'Aceptar opcion'}
+            </Button>
+          </>
+        }
+      >
+        {chooseTarget && (
+          <div className="space-y-4">
+            <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-sm text-amber-800">
+              <p>
+                <strong>Tu turno actual:</strong> {chooseTarget.asignacion_detalle.sala_codigo} ·{' '}
+                {chooseTarget.asignacion_detalle.dia} ·{' '}
+                {formatTime(chooseTarget.asignacion_detalle.hora_inicio)}–{formatTime(chooseTarget.asignacion_detalle.hora_fin)}
+              </p>
+              <p className="mt-1">
+                Al elegir una opcion, tu turno se intercambia con el del otro monitor.
+              </p>
+            </div>
+
+            {chooseTarget.respuesta && (
+              <div className="bg-blue-50 rounded-lg p-3 text-sm text-blue-800">
+                <strong>Nota del admin:</strong> {chooseTarget.respuesta}
+              </div>
+            )}
+
+            <div className="space-y-2">
+              {chooseTarget.opciones.map(op => (
+                <label
+                  key={op.id_opcion}
+                  className={[
+                    'block border rounded-lg p-3 cursor-pointer transition-colors',
+                    chosen === op.id_opcion
+                      ? 'border-primary bg-primary/5 ring-2 ring-primary/30'
+                      : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50',
+                  ].join(' ')}
+                >
+                  <input
+                    type="radio"
+                    name="opcion"
+                    value={op.id_opcion}
+                    checked={chosen === op.id_opcion}
+                    onChange={() => setChosen(op.id_opcion)}
+                    className="sr-only"
+                  />
+                  <div className="flex items-start gap-3">
+                    <UserAvatar
+                      userId={op.asignacion_swap_detalle.id_asignacion}
+                      name={op.monitor_swap_nombre}
+                      size="md"
+                    />
+                    <div className="flex-1 min-w-0">
+                      <p className="font-medium text-textMain">Opcion {op.orden}: {op.monitor_swap_nombre}</p>
+                      <p className="text-xs text-textMuted mt-0.5">
+                        Tomarias: <strong>{op.asignacion_swap_detalle.sala_codigo}</strong> ·{' '}
+                        {op.asignacion_swap_detalle.dia} ·{' '}
+                        {formatTime(op.asignacion_swap_detalle.hora_inicio)}–{formatTime(op.asignacion_swap_detalle.hora_fin)}
+                      </p>
+                      <p className="text-xs text-textMuted mt-0.5">
+                        El tomaria tu turno original.
+                      </p>
+                    </div>
+                    {chosen === op.id_opcion && <CheckCircle className="w-5 h-5 text-primary shrink-0" />}
+                  </div>
+                </label>
+              ))}
+            </div>
+          </div>
+        )}
+      </Modal>
+
+      {/* ============== MODAL: admin rechaza ============== */}
+      <Modal
+        open={rejectOpen}
+        onClose={() => setRejectOpen(false)}
+        title="Rechazar solicitud"
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setRejectOpen(false)}>Cancelar</Button>
+            <Button variant="danger" onClick={handleReject} disabled={rejecting}>
+              {rejecting ? 'Guardando…' : 'Rechazar'}
+            </Button>
+          </>
+        }
+      >
+        {rejectTarget && (
+          <div className="space-y-4">
+            <p className="text-sm text-textMuted">
+              Solicitud de <strong>{rejectTarget.solicitante_nombre}</strong> para cambiar el turno{' '}
+              <strong>{rejectTarget.asignacion_detalle.sala_codigo} · {rejectTarget.asignacion_detalle.dia} ·{' '}
+              {formatTime(rejectTarget.asignacion_detalle.hora_inicio)}–{formatTime(rejectTarget.asignacion_detalle.hora_fin)}</strong>.
+            </p>
+            <label className="block">
+              <span className="text-sm font-medium text-textMain">Motivo del rechazo (opcional)</span>
               <textarea
                 rows={3}
                 className="mt-1 block w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 resize-none"
-                placeholder="Observaciones…"
-                value={respondForm.respuesta}
-                onChange={e => setRespondForm(f => ({ ...f, respuesta: e.target.value }))}
+                placeholder="Razon…"
+                value={rejectMsg}
+                onChange={e => setRejectMsg(e.target.value)}
               />
             </label>
           </div>

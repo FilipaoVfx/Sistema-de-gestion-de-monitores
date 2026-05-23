@@ -13,26 +13,37 @@ import Modal from '../components/ui/Modal'
 import Spinner from '../components/ui/Spinner'
 import ErrorMessage from '../components/ui/ErrorMessage'
 import EmptyState from '../components/ui/EmptyState'
-import { CalendarCheck, Plus, Trash2 } from 'lucide-react'
+import UserAvatar from '../components/ui/UserAvatar'
+import WeeklyScheduleGrid from '../components/WeeklyScheduleGrid'
+import { CalendarCheck, Plus, Trash2, LayoutGrid, Table as TableIcon } from 'lucide-react'
 import { formatTime } from '../utils/formatDate'
 
 interface SalaR { id_sala: number; codigo: string; nombre: string }
+type ViewMode = 'grid' | 'table'
+
+const DIAS: Record<number, string> = {
+  1: 'Lun', 2: 'Mar', 3: 'Mié', 4: 'Jue', 5: 'Vie', 6: 'Sáb',
+}
 
 export default function AsignacionesPage() {
   const { user } = useAuth()
   const { showToast } = useToast()
   const isAdmin = user?.rol === 'admin'
 
-  const [asignaciones, setAsignaciones] = useState<Asignacion[]>([])
-  const [semestres,    setSemestres]    = useState<Semestre[]>([])
-  const [filterSem,    setFilterSem]   = useState<number | ''>('')
-  const [loading,      setLoading]     = useState(true)
-  const [error,        setError]       = useState(false)
+  const [view, setView] = useState<ViewMode>('grid')
 
-  // Bulk modal state
+  const [asignaciones, setAsignaciones] = useState<Asignacion[]>([])
+  const [horariosAll,  setHorariosAll]  = useState<Horario[]>([])
+  const [semestres,    setSemestres]    = useState<Semestre[]>([])
+  const [salas,        setSalas]        = useState<SalaR[]>([])
+  const [filterSem,    setFilterSem]    = useState<number | ''>('')
+  const [filterSala,   setFilterSala]   = useState<number | ''>('')
+  const [loading,      setLoading]      = useState(true)
+  const [error,        setError]        = useState(false)
+
+  // Bulk modal (admin)
   const [modalOpen, setModalOpen] = useState(false)
   const [monitores, setMonitores] = useState<SessionUser[]>([])
-  const [salas,     setSalas]     = useState<SalaR[]>([])
   const [salaHorarios, setSalaHorarios] = useState<Horario[]>([])
   const [form, setForm] = useState({ monitor: '', semestre: '', sala: '' })
   const [selectedHorarios, setSelectedHorarios] = useState<number[]>([])
@@ -40,33 +51,46 @@ export default function AsignacionesPage() {
   const [saving, setSaving] = useState(false)
 
   const load = () => {
-    setLoading(true)
-    setError(false)
-    const params: Record<string, number> = {}
-    if (filterSem !== '') params.semestre = filterSem
-    if (!isAdmin && user?.id) params.monitor = user.id
+    setLoading(true); setError(false)
+
+    const asigParams: Record<string, number> = {}
+    if (filterSem !== '')  asigParams.semestre = filterSem as number
+    if (filterSala !== '') asigParams.sala     = filterSala as number
+    // Admin ve todo; monitor ve solo lo suyo (backend filtra)
+
     Promise.all([
-      asignacionesApi.list(params),
+      asignacionesApi.list(Object.keys(asigParams).length > 0 ? asigParams : undefined),
+      horariosApi.list(filterSala !== '' ? (filterSala as number) : undefined),
       semestresApi.list(),
+      salasApi.list(),
     ])
-      .then(([a, s]) => { setAsignaciones(a.data); setSemestres(s.data) })
+      .then(([a, h, sem, s]) => {
+        setAsignaciones(a.data)
+        setHorariosAll(h.data)
+        setSemestres(sem.data)
+        setSalas(s.data as unknown as SalaR[])
+        // Auto-seleccionar semestre activo
+        if (filterSem === '') {
+          const activo = sem.data.find(x => x.activo)
+          if (activo) setFilterSem(activo.id_semestre)
+        }
+      })
       .catch(() => setError(true))
       .finally(() => setLoading(false))
   }
 
-  useEffect(() => { load() }, [filterSem])
+  useEffect(() => { load() }, [filterSem, filterSala])
 
   const openModal = async () => {
-    setForm({ monitor: '', semestre: '', sala: '' })
+    setForm({ monitor: '', semestre: String(filterSem || ''), sala: '' })
     setSelectedHorarios([])
     setSalaHorarios([])
     setModalOpen(true)
     try {
-      const [m, s] = await Promise.all([monitoresApi.list(), salasApi.list()])
+      const m = await monitoresApi.list()
       setMonitores(m.data.filter(u => u.rol === 'monitor'))
-      setSalas(s.data as unknown as SalaR[])
     } catch {
-      showToast('Error al cargar datos del formulario', 'error')
+      showToast('Error al cargar monitores', 'error')
     }
   }
 
@@ -124,10 +148,6 @@ export default function AsignacionesPage() {
 
   const semLabel = (s: Semestre) => `${s.anio}-${s.periodo}${s.activo ? ' (activo)' : ''}`
 
-  const DIAS: Record<number, string> = {
-    1: 'Lun', 2: 'Mar', 3: 'Mié', 4: 'Jue', 5: 'Vie', 6: 'Sáb',
-  }
-
   return (
     <div className="space-y-6">
       <header className="flex items-center justify-between">
@@ -136,17 +156,36 @@ export default function AsignacionesPage() {
             <CalendarCheck className="w-6 h-6 text-primary" /> Asignaciones
           </h1>
           <p className="text-sm text-textMuted mt-1">
-            {isAdmin ? 'Turnos semanales de monitores en salas' : 'Tus turnos semanales asignados'}
+            {isAdmin
+              ? 'Cronograma semanal — turnos asignados a monitores'
+              : 'Mi cronograma — tus turnos aparecen resaltados'}
           </p>
         </div>
-        {isAdmin && (
-          <Button onClick={openModal}>
-            <Plus className="w-4 h-4" /> Nueva asignación
-          </Button>
-        )}
+        <div className="flex items-center gap-2">
+          <div className="inline-flex rounded-lg border border-gray-200 p-0.5 bg-gray-50">
+            <button
+              onClick={() => setView('grid')}
+              className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded text-xs font-medium transition-colors ${view === 'grid' ? 'bg-white text-textMain shadow-sm' : 'text-textMuted hover:text-textMain'}`}
+            >
+              <LayoutGrid className="w-3.5 h-3.5" /> Grilla
+            </button>
+            <button
+              onClick={() => setView('table')}
+              className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded text-xs font-medium transition-colors ${view === 'table' ? 'bg-white text-textMain shadow-sm' : 'text-textMuted hover:text-textMain'}`}
+            >
+              <TableIcon className="w-3.5 h-3.5" /> Tabla
+            </button>
+          </div>
+          {isAdmin && (
+            <Button onClick={openModal}>
+              <Plus className="w-4 h-4" /> Nueva asignación
+            </Button>
+          )}
+        </div>
       </header>
 
-      <div className="flex items-center gap-3">
+      {/* Filtros */}
+      <div className="flex flex-wrap items-center gap-3">
         <label className="text-sm font-medium text-textMain">Semestre:</label>
         <select
           className="rounded-lg border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
@@ -158,10 +197,36 @@ export default function AsignacionesPage() {
             <option key={s.id_semestre} value={s.id_semestre}>{semLabel(s)}</option>
           ))}
         </select>
+
+        <label className="text-sm font-medium text-textMain ml-3">Sala:</label>
+        <select
+          className="rounded-lg border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
+          value={filterSala}
+          onChange={e => setFilterSala(e.target.value !== '' ? Number(e.target.value) : '')}
+        >
+          <option value="">Todas las salas</option>
+          {salas.map(s => (
+            <option key={s.id_sala} value={s.id_sala}>{s.codigo} — {s.nombre}</option>
+          ))}
+        </select>
       </div>
 
       <Card>
-        {loading ? <Spinner /> : error ? <ErrorMessage onRetry={load} /> : asignaciones.length === 0 ? (
+        {loading ? (
+          <Spinner />
+        ) : error ? (
+          <ErrorMessage onRetry={load} />
+        ) : view === 'grid' ? (
+          horariosAll.length === 0 ? (
+            <EmptyState title="Sin horarios" description="No hay horarios para construir la grilla. Crea algunos en la página de Horarios." />
+          ) : (
+            <WeeklyScheduleGrid
+              horarios={horariosAll}
+              asignaciones={asignaciones}
+              highlightUserId={user?.rol === 'monitor' ? user.id : undefined}
+            />
+          )
+        ) : asignaciones.length === 0 ? (
           <EmptyState
             title="Sin asignaciones"
             description="No hay asignaciones para este filtro."
@@ -179,8 +244,13 @@ export default function AsignacionesPage() {
               </thead>
               <tbody className="divide-y divide-gray-50">
                 {asignaciones.map(a => (
-                  <tr key={a.id_asignacion} className="hover:bg-gray-50/50">
-                    <td className="px-6 py-3 font-medium text-textMain">{a.monitor_nombre}</td>
+                  <tr key={a.id_asignacion} className={a.monitor === user?.id ? 'bg-primary/5 hover:bg-primary/10' : 'hover:bg-gray-50/50'}>
+                    <td className="px-6 py-3">
+                      <div className="flex items-center gap-2">
+                        <UserAvatar userId={a.monitor} name={a.monitor_nombre} size="sm" />
+                        <span className="font-medium text-textMain">{a.monitor_nombre}</span>
+                      </div>
+                    </td>
                     <td className="px-6 py-3 text-textMuted font-mono">{a.sala_codigo}</td>
                     <td className="px-6 py-3 text-textMuted">{a.dia_semana_display || DIAS[a.dia_semana]}</td>
                     <td className="px-6 py-3 text-textMuted">{formatTime(a.hora_inicio)}–{formatTime(a.hora_fin)}</td>
@@ -200,7 +270,7 @@ export default function AsignacionesPage() {
         )}
       </Card>
 
-      {/* Bulk create modal */}
+      {/* Modal bulk create (admin) */}
       <Modal
         open={modalOpen}
         onClose={() => setModalOpen(false)}
@@ -208,10 +278,7 @@ export default function AsignacionesPage() {
         footer={
           <>
             <Button variant="secondary" onClick={() => setModalOpen(false)}>Cancelar</Button>
-            <Button
-              onClick={handleSave}
-              disabled={saving || selectedHorarios.length === 0}
-            >
+            <Button onClick={handleSave} disabled={saving || selectedHorarios.length === 0}>
               {saving ? 'Guardando…' : `Asignar ${selectedHorarios.length > 0 ? `(${selectedHorarios.length})` : ''}`}
             </Button>
           </>

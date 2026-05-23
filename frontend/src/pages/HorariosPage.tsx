@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react'
 import { horariosApi, type Horario } from '../api/horarios.api'
 import { salasApi } from '../api/salas.api'
+import { asignacionesApi, type Asignacion } from '../api/asignaciones.api'
+import { semestresApi, type Semestre } from '../api/semestres.api'
 import { useAuth } from '../context/AuthContext'
 import { useToast } from '../components/ui/Toast'
 import Card from '../components/ui/Card'
@@ -9,7 +11,8 @@ import Modal from '../components/ui/Modal'
 import Spinner from '../components/ui/Spinner'
 import ErrorMessage from '../components/ui/ErrorMessage'
 import EmptyState from '../components/ui/EmptyState'
-import { Clock, Plus, Trash2 } from 'lucide-react'
+import WeeklyScheduleGrid from '../components/WeeklyScheduleGrid'
+import { Clock, Plus, Table as TableIcon, LayoutGrid, Trash2 } from 'lucide-react'
 
 interface SalaR { id_sala: number; codigo: string; nombre: string }
 
@@ -17,33 +20,52 @@ const DIAS: Record<number, string> = {
   1: 'Lunes', 2: 'Martes', 3: 'Miércoles', 4: 'Jueves', 5: 'Viernes', 6: 'Sábado',
 }
 
+type ViewMode = 'grid' | 'table'
+
 export default function HorariosPage() {
   const { user } = useAuth()
   const { showToast } = useToast()
   const isAdmin = user?.rol === 'admin'
 
-  const [horarios,   setHorarios]   = useState<Horario[]>([])
-  const [salas,      setSalas]      = useState<SalaR[]>([])
+  const [view, setView]     = useState<ViewMode>('grid')
+  const [horarios, setHorarios] = useState<Horario[]>([])
+  const [salas, setSalas]       = useState<SalaR[]>([])
+  const [semestres, setSemestres] = useState<Semestre[]>([])
+  const [asignaciones, setAsignaciones] = useState<Asignacion[]>([])
   const [filterSala, setFilterSala] = useState<number | ''>('')
-  const [loading,    setLoading]    = useState(true)
-  const [error,      setError]      = useState(false)
-  const [modalOpen,  setModalOpen]  = useState(false)
-  const [form,       setForm]       = useState({ sala: '', dia_semana: '1', hora_inicio: '08:00', hora_fin: '10:00' })
-  const [saving,     setSaving]     = useState(false)
+  const [filterSem, setFilterSem]   = useState<number | ''>('')
+  const [loading, setLoading] = useState(true)
+  const [error, setError]     = useState(false)
+
+  // Modal nuevo horario
+  const [modalOpen, setModalOpen] = useState(false)
+  const [form, setForm] = useState({ sala: '', dia_semana: '1', hora_inicio: '08:00', hora_fin: '10:00' })
+  const [saving, setSaving] = useState(false)
 
   const load = () => {
-    setLoading(true)
-    setError(false)
+    setLoading(true); setError(false)
     Promise.all([
       horariosApi.list(filterSala !== '' ? filterSala : undefined),
       salasApi.list(),
+      semestresApi.list(),
+      asignacionesApi.list(filterSem !== '' ? { semestre: filterSem as number, ...(filterSala !== '' ? { sala: filterSala as number } : {}) } : (filterSala !== '' ? { sala: filterSala as number } : undefined)),
     ])
-      .then(([h, s]) => { setHorarios(h.data); setSalas(s.data as unknown as SalaR[]) })
+      .then(([h, s, sem, a]) => {
+        setHorarios(h.data)
+        setSalas(s.data as unknown as SalaR[])
+        setSemestres(sem.data)
+        setAsignaciones(a.data)
+        // Auto-seleccionar semestre activo si no hay filtro aun
+        if (filterSem === '') {
+          const activo = sem.data.find(x => x.activo)
+          if (activo) setFilterSem(activo.id_semestre)
+        }
+      })
       .catch(() => setError(true))
       .finally(() => setLoading(false))
   }
 
-  useEffect(() => { load() }, [filterSala])
+  useEffect(() => { load() }, [filterSala, filterSem])
 
   const handleSave = async () => {
     if (!form.sala) return
@@ -85,17 +107,36 @@ export default function HorariosPage() {
           <h1 className="text-2xl font-bold text-textMain flex items-center gap-2">
             <Clock className="w-6 h-6 text-primary" /> Horarios
           </h1>
-          <p className="text-sm text-textMuted mt-1">Bloques horarios disponibles por sala</p>
+          <p className="text-sm text-textMuted mt-1">
+            Bloques horarios por sala. Avatares muestran el monitor asignado en el semestre seleccionado.
+          </p>
         </div>
-        {isAdmin && (
-          <Button onClick={() => setModalOpen(true)}>
-            <Plus className="w-4 h-4" /> Nuevo horario
-          </Button>
-        )}
+        <div className="flex items-center gap-2">
+          <div className="inline-flex rounded-lg border border-gray-200 p-0.5 bg-gray-50">
+            <button
+              onClick={() => setView('grid')}
+              className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded text-xs font-medium transition-colors ${view === 'grid' ? 'bg-white text-textMain shadow-sm' : 'text-textMuted hover:text-textMain'}`}
+            >
+              <LayoutGrid className="w-3.5 h-3.5" /> Grilla
+            </button>
+            <button
+              onClick={() => setView('table')}
+              className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded text-xs font-medium transition-colors ${view === 'table' ? 'bg-white text-textMain shadow-sm' : 'text-textMuted hover:text-textMain'}`}
+            >
+              <TableIcon className="w-3.5 h-3.5" /> Tabla
+            </button>
+          </div>
+          {isAdmin && (
+            <Button onClick={() => setModalOpen(true)}>
+              <Plus className="w-4 h-4" /> Nuevo horario
+            </Button>
+          )}
+        </div>
       </header>
 
-      <div className="flex items-center gap-3">
-        <label className="text-sm font-medium text-textMain">Filtrar por sala:</label>
+      {/* Filtros */}
+      <div className="flex flex-wrap items-center gap-3">
+        <label className="text-sm font-medium text-textMain">Sala:</label>
         <select
           className="rounded-lg border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
           value={filterSala}
@@ -106,12 +147,37 @@ export default function HorariosPage() {
             <option key={s.id_sala} value={s.id_sala}>{s.codigo} — {s.nombre}</option>
           ))}
         </select>
+
+        <label className="text-sm font-medium text-textMain ml-3">Semestre:</label>
+        <select
+          className="rounded-lg border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
+          value={filterSem}
+          onChange={e => setFilterSem(e.target.value !== '' ? Number(e.target.value) : '')}
+        >
+          <option value="">Todos</option>
+          {semestres.map(s => (
+            <option key={s.id_semestre} value={s.id_semestre}>
+              {s.anio}-{s.periodo}{s.activo ? ' (activo)' : ''}
+            </option>
+          ))}
+        </select>
       </div>
 
       <Card>
-        {loading ? <Spinner /> : error ? <ErrorMessage onRetry={load} /> : horarios.length === 0 ? (
-          <EmptyState title="Sin horarios" description="No hay horarios registrados para esta selección." />
+        {loading ? (
+          <Spinner />
+        ) : error ? (
+          <ErrorMessage onRetry={load} />
+        ) : horarios.length === 0 ? (
+          <EmptyState title="Sin horarios" description="No hay horarios registrados para esta seleccion." />
+        ) : view === 'grid' ? (
+          <WeeklyScheduleGrid
+            horarios={horarios}
+            asignaciones={asignaciones}
+            highlightUserId={user?.rol === 'monitor' ? user.id : undefined}
+          />
         ) : (
+          /* Vista TABLA */
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
