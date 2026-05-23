@@ -32,18 +32,20 @@ export default function SolicitudesCambioPage() {
   const [loading,  setLoading]  = useState(true)
   const [error,    setError]    = useState(false)
 
-  // Create modal (monitor)
+  // Create modal (monitor): solo asignacion + motivo. El admin elige reemplazo.
   const [createOpen, setCreateOpen] = useState(false)
   const [misAsignaciones, setMisAsignaciones] = useState<Asignacion[]>([])
-  const [monitores, setMonitores] = useState<SessionUser[]>([])
-  const [createForm, setCreateForm] = useState({ asignacion: '', monitor_reemplazo: '', motivo: '' })
+  const [createForm, setCreateForm] = useState({ asignacion: '', motivo: '' })
   const [creating, setCreating] = useState(false)
 
-  // Respond modal (admin)
+  // Respond modal (admin): elige monitor reemplazo al aprobar.
   const [respondOpen,   setRespondOpen]   = useState(false)
   const [respondTarget, setRespondTarget] = useState<SolicitudCambio | null>(null)
-  const [respondForm,   setRespondForm]   = useState({ estado: 'aprobada', respuesta: '' })
+  const [respondForm,   setRespondForm]   = useState({
+    estado: 'aprobada', monitor_reemplazo: '', respuesta: '',
+  })
   const [responding,    setResponding]    = useState(false)
+  const [monitores,     setMonitores]     = useState<SessionUser[]>([])
 
   const load = () => {
     setLoading(true)
@@ -57,30 +59,25 @@ export default function SolicitudesCambioPage() {
   useEffect(() => { load() }, [filterEstado])
 
   const openCreate = async () => {
-    setCreateForm({ asignacion: '', monitor_reemplazo: '', motivo: '' })
+    setCreateForm({ asignacion: '', motivo: '' })
     setCreateOpen(true)
     try {
-      const [a, m] = await Promise.all([
-        asignacionesApi.list(user?.id ? { monitor: user.id } : {}),
-        monitoresApi.list(),
-      ])
+      const a = await asignacionesApi.list(user?.id ? { monitor: user.id } : {})
       setMisAsignaciones(a.data)
-      setMonitores(m.data.filter(u => u.rol === 'monitor' && u.id !== user?.id))
     } catch {
-      showToast('Error al cargar datos', 'error')
+      showToast('Error al cargar tus turnos', 'error')
     }
   }
 
   const handleCreate = async () => {
-    if (!createForm.asignacion || !createForm.monitor_reemplazo) return
+    if (!createForm.asignacion) return
     setCreating(true)
     try {
       await cambiosApi.create({
-        asignacion:         Number(createForm.asignacion),
-        monitor_reemplazo:  Number(createForm.monitor_reemplazo),
-        motivo:             createForm.motivo || undefined,
+        asignacion: Number(createForm.asignacion),
+        motivo:     createForm.motivo || undefined,
       })
-      showToast('Solicitud enviada')
+      showToast('Solicitud enviada — el admin asignará el reemplazo')
       setCreateOpen(false)
       load()
     } catch {
@@ -90,25 +87,41 @@ export default function SolicitudesCambioPage() {
     }
   }
 
-  const openRespond = (s: SolicitudCambio) => {
+  const openRespond = async (s: SolicitudCambio) => {
     setRespondTarget(s)
-    setRespondForm({ estado: 'aprobada', respuesta: '' })
+    setRespondForm({ estado: 'aprobada', monitor_reemplazo: '', respuesta: '' })
     setRespondOpen(true)
+    // Cargar lista de monitores (excluyendo al solicitante) para el dropdown
+    try {
+      const m = await monitoresApi.list()
+      setMonitores(m.data.filter(u => u.rol === 'monitor' && u.id !== s.solicitante))
+    } catch {
+      showToast('Error al cargar monitores', 'error')
+    }
   }
 
   const handleRespond = async () => {
     if (!respondTarget) return
+    // Si va a aprobar, requiere reemplazo
+    if (respondForm.estado === 'aprobada' && !respondForm.monitor_reemplazo) {
+      showToast('Selecciona un monitor reemplazo para aprobar', 'error')
+      return
+    }
     setResponding(true)
     try {
       await cambiosApi.responder(respondTarget.id_cambio, {
-        estado:    respondForm.estado as 'aprobada' | 'rechazada',
-        respuesta: respondForm.respuesta || undefined,
+        estado:            respondForm.estado as 'aprobada' | 'rechazada',
+        monitor_reemplazo: respondForm.estado === 'aprobada' && respondForm.monitor_reemplazo
+                             ? Number(respondForm.monitor_reemplazo)
+                             : undefined,
+        respuesta:         respondForm.respuesta || undefined,
       })
       showToast(`Solicitud ${respondForm.estado === 'aprobada' ? 'aprobada' : 'rechazada'}`)
       setRespondOpen(false)
       load()
-    } catch {
-      showToast('Error al responder solicitud', 'error')
+    } catch (err: any) {
+      const msg = err?.response?.data?.error || 'Error al responder solicitud'
+      showToast(msg, 'error')
     } finally {
       setResponding(false)
     }
@@ -168,7 +181,11 @@ export default function SolicitudesCambioPage() {
                 {solicitudes.map(s => (
                   <tr key={s.id_cambio} className="hover:bg-gray-50/50">
                     <td className="px-6 py-3 font-medium text-textMain">{s.solicitante_nombre}</td>
-                    <td className="px-6 py-3 text-textMuted">{s.monitor_reemplazo_nombre}</td>
+                    <td className="px-6 py-3 text-textMuted">
+                      {s.monitor_reemplazo_nombre ?? (
+                        <span className="italic text-gray-400">Pendiente de asignación</span>
+                      )}
+                    </td>
                     <td className="px-6 py-3 text-textMuted text-xs">
                       {s.asignacion_detalle
                         ? `${s.asignacion_detalle.sala} · ${s.asignacion_detalle.dia} · ${formatTime(s.asignacion_detalle.hora_inicio)}–${formatTime(s.asignacion_detalle.hora_fin)}`
@@ -227,21 +244,13 @@ export default function SolicitudesCambioPage() {
               ))}
             </select>
           </label>
-          <label className="block">
-            <span className="text-sm font-medium text-textMain">Monitor de reemplazo</span>
-            <select
-              className="mt-1 block w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
-              value={createForm.monitor_reemplazo}
-              onChange={e => setCreateForm(f => ({ ...f, monitor_reemplazo: e.target.value }))}
-            >
-              <option value="">Seleccionar monitor…</option>
-              {monitores.map(m => (
-                <option key={m.id} value={m.id}>
-                  {[m.first_name, m.last_name].filter(Boolean).join(' ') || m.email}
-                </option>
-              ))}
-            </select>
-          </label>
+          <div className="flex items-start gap-3 bg-blue-50 border border-blue-200 rounded-lg p-3">
+            <ArrowLeftRight className="w-5 h-5 text-blue-600 shrink-0 mt-0.5" />
+            <p className="text-sm text-blue-800 leading-relaxed">
+              El administrador asignará un monitor de reemplazo al aprobar tu solicitud.
+              No es necesario que indiques quién te cubrirá.
+            </p>
+          </div>
           <label className="block">
             <span className="text-sm font-medium text-textMain">Motivo (opcional)</span>
             <textarea
@@ -277,7 +286,12 @@ export default function SolicitudesCambioPage() {
           <div className="space-y-4">
             <div className="bg-gray-50 rounded-lg p-3 text-sm space-y-1">
               <p><span className="font-medium">Solicitante:</span> {respondTarget.solicitante_nombre}</p>
-              <p><span className="font-medium">Reemplazo:</span> {respondTarget.monitor_reemplazo_nombre}</p>
+              <p>
+                <span className="font-medium">Turno:</span>{' '}
+                {respondTarget.asignacion_detalle
+                  ? `${respondTarget.asignacion_detalle.sala} · ${respondTarget.asignacion_detalle.dia} · ${formatTime(respondTarget.asignacion_detalle.hora_inicio)}–${formatTime(respondTarget.asignacion_detalle.hora_fin)}`
+                  : `#${respondTarget.asignacion}`}
+              </p>
               {respondTarget.motivo && <p><span className="font-medium">Motivo:</span> {respondTarget.motivo}</p>}
             </div>
             <div>
@@ -309,6 +323,31 @@ export default function SolicitudesCambioPage() {
                 </label>
               </div>
             </div>
+
+            {/* Select de monitor reemplazo — solo al aprobar */}
+            {respondForm.estado === 'aprobada' && (
+              <label className="block">
+                <span className="text-sm font-medium text-textMain">
+                  Monitor de reemplazo <span className="text-danger">*</span>
+                </span>
+                <select
+                  className="mt-1 block w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
+                  value={respondForm.monitor_reemplazo}
+                  onChange={e => setRespondForm(f => ({ ...f, monitor_reemplazo: e.target.value }))}
+                >
+                  <option value="">Seleccionar monitor…</option>
+                  {monitores.map(m => (
+                    <option key={m.id} value={m.id}>
+                      {[m.first_name, m.last_name].filter(Boolean).join(' ') || m.email}
+                    </option>
+                  ))}
+                </select>
+                <span className="text-xs text-textMuted mt-1 block">
+                  El monitor que cubrirá el turno del solicitante.
+                </span>
+              </label>
+            )}
+
             <label className="block">
               <span className="text-sm font-medium text-textMain">Respuesta (opcional)</span>
               <textarea

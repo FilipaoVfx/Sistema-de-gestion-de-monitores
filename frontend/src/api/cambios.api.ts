@@ -14,9 +14,10 @@ export interface SolicitudCambio {
   solicitante: number
   solicitante_email: string
   solicitante_nombre: string
-  monitor_reemplazo: number
-  monitor_reemplazo_email: string
-  monitor_reemplazo_nombre: string
+  /** Puede ser null: el monitor solicita sin reemplazo, admin asigna al aprobar. */
+  monitor_reemplazo: number | null
+  monitor_reemplazo_email: string | null
+  monitor_reemplazo_nombre: string | null
   tipo: string
   motivo: string
   estado: 'pendiente' | 'aprobada' | 'rechazada'
@@ -33,9 +34,17 @@ export const cambiosApi = {
 
   get: (id: number) => api.get<SolicitudCambio>(`/api/cambios/${id}/`),
 
-  create: (data: { asignacion: number; monitor_reemplazo: number; motivo?: string }) =>
+  /** Monitor crea solicitud: solo asignacion + motivo. El admin elige reemplazo al aprobar. */
+  create: (data: { asignacion: number; motivo?: string }) =>
     api.post<SolicitudCambio>('/api/cambios/', data),
 
-  responder: (id: number, data: { estado: 'aprobada' | 'rechazada'; respuesta?: string }) =>
-    api.post<SolicitudCambio>(`/api/cambios/${id}/responder/`, data),
+  /** Admin responde: si estado=aprobada, monitor_reemplazo es obligatorio. */
+  responder: (
+    id: number,
+    data: {
+      estado: 'aprobada' | 'rechazada'
+      monitor_reemplazo?: number
+      respuesta?: string
+    },
+  ) => api.post<SolicitudCambio>(`/api/cambios/${id}/responder/`, data),
 }
