@@ -16,6 +16,7 @@ class SolicitudCambio(models.Model):
 	"""
 
 	PENDIENTE = "pendiente"
+	CON_PROPUESTAS = "con_propuestas"
 	APROBADA = "aprobada"
 	RECHAZADA = "rechazada"
 
@@ -26,6 +27,7 @@ class SolicitudCambio(models.Model):
 
 	ESTADO_CHOICES = [
 		(PENDIENTE, "Pendiente"),
+		(CON_PROPUESTAS, "Con propuestas"),
 		(APROBADA, "Aprobada"),
 		(RECHAZADA, "Rechazada"),
 	]
@@ -140,5 +142,78 @@ class SolicitudCambio(models.Model):
 
 	def __str__(self):
 		return f"Solicitud de cambio ({self.asignacion}) - {self.estado}"
+
+
+class OpcionCambio(models.Model):
+	"""Opcion de SWAP propuesta por el admin para una solicitud de cambio.
+
+	Cada opcion representa la asignacion de OTRO monitor con la que se haria
+	un swap completo si el solicitante la acepta:
+	- El monitor reemplazo cubre el turno original del solicitante
+	- El solicitante cubre el turno del reemplazo
+
+	El admin propone al menos 2 opciones; el monitor solicitante elige cual
+	prefiere. Al elegir se ejecuta el swap atomico y la solicitud queda
+	APROBADA.
+	"""
+
+	id_opcion = models.AutoField(primary_key=True)
+	solicitud = models.ForeignKey(
+		SolicitudCambio,
+		on_delete=models.CASCADE,
+		related_name="opciones",
+	)
+	# La asignacion del OTRO monitor que se ofrece para swap
+	asignacion_swap = models.ForeignKey(
+		"asignaciones.Asignacion",
+		on_delete=models.CASCADE,
+		related_name="opciones_swap",
+	)
+	# Orden de presentacion (1, 2, 3...)
+	orden = models.PositiveSmallIntegerField(default=1)
+	# Marcador de la opcion que el monitor eligio (solo una por solicitud)
+	seleccionada = models.BooleanField(default=False)
+	fecha_creacion = models.DateTimeField(auto_now_add=True)
+
+	class Meta:
+		ordering = ["solicitud", "orden"]
+		constraints = [
+			# No se puede ofrecer la misma asignacion dos veces en la misma solicitud
+			UniqueConstraint(
+				fields=["solicitud", "asignacion_swap"],
+				name="unique_asignacion_swap_per_solicitud",
+			),
+			# Solo una opcion seleccionada por solicitud
+			UniqueConstraint(
+				fields=["solicitud"],
+				condition=Q(seleccionada=True),
+				name="unique_selected_opcion_per_solicitud",
+			),
+		]
+
+	def clean(self):
+		# La asignacion_swap no puede ser la misma del solicitante
+		if self.solicitud_id and self.asignacion_swap_id:
+			if self.solicitud.asignacion_id == self.asignacion_swap_id:
+				raise ValidationError({
+					"asignacion_swap": "La opcion no puede ser la misma asignacion del solicitante."
+				})
+			# La asignacion_swap debe pertenecer a otro monitor (no al solicitante)
+			if self.asignacion_swap.monitor_id == self.solicitud.solicitante_id:
+				raise ValidationError({
+					"asignacion_swap": "El swap debe ser con la asignacion de otro monitor."
+				})
+			# Ambas asignaciones deben ser del mismo semestre
+			if self.asignacion_swap.semestre_id != self.solicitud.asignacion.semestre_id:
+				raise ValidationError({
+					"asignacion_swap": "Las asignaciones deben ser del mismo semestre."
+				})
+
+	def save(self, *args, **kwargs):
+		self.full_clean()
+		super().save(*args, **kwargs)
+
+	def __str__(self):
+		return f"Opcion {self.orden} para solicitud {self.solicitud_id}"
 
 
