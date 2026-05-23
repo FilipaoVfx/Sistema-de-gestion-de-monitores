@@ -7,9 +7,9 @@ from django.contrib.auth import authenticate
 from django.core.mail import send_mail
 from django.db import transaction
 from rest_framework import generics, permissions, status, viewsets
-from rest_framework.authtoken.models import Token
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
+from rest_framework_simplejwt.tokens import RefreshToken
 from asgiref.sync import async_to_sync
 
 from .models import Usuario
@@ -31,7 +31,12 @@ logger = logging.getLogger(__name__)
 @api_view(['POST'])
 @permission_classes([permissions.AllowAny])
 def login_view(request):
-    """POST /api/auth/login/  →  { token, user }"""
+    """POST /api/auth/login/  →  { access, refresh, user }
+
+    Autentica por email+password y devuelve un par JWT (access corto +
+    refresh largo). El frontend guarda ambos en localStorage y envia
+    `Authorization: Bearer <access>` en cada request.
+    """
     serializer = LoginSerializer(data=request.data)
     serializer.is_valid(raise_exception=True)
     email = serializer.validated_data['email']
@@ -41,20 +46,32 @@ def login_view(request):
     if user is None:
         return Response({'error': 'Credenciales inválidas.'}, status=status.HTTP_401_UNAUTHORIZED)
 
-    token, _ = Token.objects.get_or_create(user=user)
+    refresh = RefreshToken.for_user(user)
+    # Adjunta el rol como claim para que el frontend pueda decidir sin
+    # tener que decodificar el access. Tambien queda en el JWT firmado.
+    refresh['rol']   = user.rol
+    refresh['email'] = user.email
+
     return Response({
-        'token': token.key,
-        'user': UsuarioSerializer(user).data,
+        'access':  str(refresh.access_token),
+        'refresh': str(refresh),
+        'user':    UsuarioSerializer(user).data,
     })
 
 
 @api_view(['POST'])
 def logout_view(request):
-    """POST /api/auth/logout/  →  204"""
-    try:
-        request.user.auth_token.delete()
-    except Exception:
-        pass
+    """POST /api/auth/logout/  →  204
+
+    Body: { refresh: "<refresh_token>" } — opcional. Si se provee, el
+    refresh queda blacklisted (no se puede usar para renovar access).
+    """
+    refresh_str = request.data.get('refresh') if hasattr(request, 'data') else None
+    if refresh_str:
+        try:
+            RefreshToken(refresh_str).blacklist()
+        except Exception:
+            pass  # token expirado o invalido — nada que blacklist
     return Response(status=status.HTTP_204_NO_CONTENT)
 
 

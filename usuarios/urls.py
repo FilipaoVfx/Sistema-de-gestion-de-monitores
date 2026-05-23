@@ -1,6 +1,7 @@
 from django.contrib.auth import views as auth_views
 from django.urls import path
 from rest_framework.routers import DefaultRouter
+from rest_framework_simplejwt.views import TokenRefreshView
 
 from . import views
 
@@ -8,11 +9,12 @@ router = DefaultRouter()
 router.register(r'usuarios', views.UsuarioViewSet, basename='usuario')
 
 urlpatterns = [
-    # Auth
-    path('auth/login/', views.login_view, name='login'),
-    path('auth/logout/', views.logout_view, name='logout'),
-    path('auth/me/', views.me_view, name='me'),
-    path('auth/debug-ping/', views.debug_ping_view, name='debug_ping'),
+    # Auth (JWT)
+    path('auth/login/',   views.login_view,           name='login'),
+    path('auth/logout/',  views.logout_view,          name='logout'),
+    path('auth/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
+    path('auth/me/',      views.me_view,              name='me'),
+    path('auth/debug-ping/', views.debug_ping_view,   name='debug_ping'),
 
     # User management
     path('usuarios/monitores/', views.CrearMonitorView.as_view(), name='crear_monitor'),
