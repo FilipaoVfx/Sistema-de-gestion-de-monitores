@@ -4,18 +4,23 @@ import {
 } from 'lucide-react'
 import { useAuth } from '../../context/AuthContext'
 
-// Las rutas del front replican las del backend Django desplegado
-const navItems = [
-  { to: '/',                   icon: LayoutDashboard, label: 'Dashboard'           },
-  { to: '/salas',              icon: Building2,        label: 'Salas'               },
-  { to: '/monitores',          icon: Monitor,          label: 'Monitores'           },
-  { to: '/horarios',           icon: Clock,            label: 'Horarios'            },
-  { to: '/asignaciones',       icon: CalendarCheck,    label: 'Asignaciones'        },
-  { to: '/solicitudes-cambio', icon: ArrowLeftRight,   label: 'Solicitudes cambio'  },
+// Nav items con permisos por rol. Monitor solo ve Dashboard, Asignaciones
+// (su cronograma) y Solicitudes. Admin ve todo.
+type Role = 'admin' | 'monitor'
+const navItems: { to: string; icon: typeof Monitor; label: string; roles: Role[] }[] = [
+  { to: '/',                   icon: LayoutDashboard, label: 'Dashboard',          roles: ['admin', 'monitor'] },
+  { to: '/salas',              icon: Building2,       label: 'Salas',              roles: ['admin']            },
+  { to: '/monitores',          icon: Monitor,         label: 'Monitores',          roles: ['admin']            },
+  { to: '/horarios',           icon: Clock,           label: 'Horarios',           roles: ['admin']            },
+  { to: '/asignaciones',       icon: CalendarCheck,   label: 'Asignaciones',       roles: ['admin', 'monitor'] },
+  { to: '/solicitudes-cambio', icon: ArrowLeftRight,  label: 'Solicitudes cambio', roles: ['admin', 'monitor'] },
 ]
 
 export default function Sidebar() {
   const { user, logout } = useAuth()
+  const role = (user?.rol === 'admin' ? 'admin' : 'monitor') as Role
+  const allowed = navItems.filter(n => n.roles.includes(role))
+
   const displayName = (user?.first_name && user?.last_name)
     ? `${user.first_name} ${user.last_name}`
     : user?.first_name || user?.email || 'Usuario'
@@ -31,7 +36,7 @@ export default function Sidebar() {
 
       {/* Nav */}
       <nav className="flex-1 px-3 py-4 space-y-1">
-        {navItems.map(({ to, icon: Icon, label }) => (
+        {allowed.map(({ to, icon: Icon, label }) => (
           <NavLink
             key={to}
             to={to}

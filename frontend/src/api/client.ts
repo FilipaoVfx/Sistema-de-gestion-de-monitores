@@ -1,4 +1,4 @@
-import axios from 'axios'
+import axios, { type AxiosRequestConfig } from 'axios'
 
 /**
  * Backend: Django + DRF JSON API en https://sistema-de-gestion-de-monitores.onrender.com
@@ -7,31 +7,67 @@ import axios from 'axios'
  *  - En desarrollo: apunta directo al backend via VITE_API_URL
  *  - En producción (Vercel): VITE_API_URL = "/_api" → pasa por Vercel proxy (ver vercel.json)
  *
- * Auth: Token Authentication (DRF)
- *  - Token se guarda en localStorage
- *  - Se inyecta como "Authorization: Token <key>" en cada request
+ * Auth: JWT (djangorestframework-simplejwt)
+ *  - Se guardan access + refresh en localStorage (auth_access, auth_refresh)
+ *  - Se inyecta `Authorization: Bearer <access>` en cada request
+ *  - Si access expira (401), se intenta refresh automaticamente UNA vez
+ *    y se reintenta el request original con el nuevo access
  */
 const BASE_URL =
   import.meta.env.VITE_API_URL ??
   (import.meta.env.PROD ? '/_api' : 'https://sistema-de-gestion-de-monitores.onrender.com')
+
+export const TOKEN_ACCESS_KEY  = 'auth_access'
+export const TOKEN_REFRESH_KEY = 'auth_refresh'
 
 export const api = axios.create({
   baseURL: BASE_URL,
   headers: { 'Content-Type': 'application/json' },
 })
 
-// Inyecta el token en cada request si existe
+// Inyecta el access token en cada request si existe
 api.interceptors.request.use((config) => {
-  const token = localStorage.getItem('auth_token')
-  if (token) {
-    config.headers['Authorization'] = `Token ${token}`
+  const access = localStorage.getItem(TOKEN_ACCESS_KEY)
+  if (access) {
+    config.headers['Authorization'] = `Bearer ${access}`
   }
   return config
 })
 
+// Cliente "raw" sin interceptors — se usa para el refresh y evitar loops.
+const rawApi = axios.create({
+  baseURL: BASE_URL,
+  headers: { 'Content-Type': 'application/json' },
+})
+
+// Manejo de refresh con cola: si llegan varios 401 a la vez, solo se hace
+// UN refresh y el resto de requests espera el resultado.
+let refreshPromise: Promise<string | null> | null = null
+
+async function doRefresh(): Promise<string | null> {
+  const refresh = localStorage.getItem(TOKEN_REFRESH_KEY)
+  if (!refresh) return null
+  try {
+    const r = await rawApi.post<{ access: string; refresh?: string }>(
+      '/api/auth/refresh/',
+      { refresh },
+    )
+    const newAccess = r.data.access
+    localStorage.setItem(TOKEN_ACCESS_KEY, newAccess)
+    // Si el backend rota el refresh, guardamos el nuevo. Ver SIMPLE_JWT.ROTATE_REFRESH_TOKENS
+    if (r.data.refresh) {
+      localStorage.setItem(TOKEN_REFRESH_KEY, r.data.refresh)
+    }
+    return newAccess
+  } catch {
+    localStorage.removeItem(TOKEN_ACCESS_KEY)
+    localStorage.removeItem(TOKEN_REFRESH_KEY)
+    return null
+  }
+}
+
 // Desempaqueta respuestas paginadas de DRF ({count, next, previous, results: []})
-// para que las páginas puedan usar .map() directamente sobre r.data.
-// Limpia el token si el servidor responde 401.
+// y maneja refresh automatico en 401.
 api.interceptors.response.use(
   (res) => {
     const d = res.data
@@ -43,10 +79,29 @@ api.interceptors.response.use(
     }
     return res
   },
-  (err) => {
-    if (err.response?.status === 401) {
-      localStorage.removeItem('auth_token')
+  async (err) => {
+    const original = err.config as AxiosRequestConfig & { _retry?: boolean }
+    const status = err.response?.status
+
+    // 401 + no es un retry previo + no es el endpoint de login/refresh
+    const isAuthEndpoint = original?.url?.includes('/api/auth/login')
+                         || original?.url?.includes('/api/auth/refresh')
+
+    if (status === 401 && !original?._retry && !isAuthEndpoint) {
+      // Lock con promesa compartida para evitar refresh paralelos
+      if (!refreshPromise) {
+        refreshPromise = doRefresh().finally(() => { refreshPromise = null })
+      }
+      const newAccess = await refreshPromise
+      if (newAccess && original) {
+        original._retry = true
+        original.headers = { ...(original.headers || {}), Authorization: `Bearer ${newAccess}` }
+        return api.request(original)
+      }
+      // refresh fallo: limpia tokens (ya se hizo en doRefresh) y deja
+      // que el AuthProvider redirija a /usuarios/login en su me().catch
     }
+
     return Promise.reject(err)
   },
 )

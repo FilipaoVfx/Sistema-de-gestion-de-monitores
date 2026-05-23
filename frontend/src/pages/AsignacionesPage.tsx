@@ -30,6 +30,7 @@ export default function AsignacionesPage() {
   const { showToast } = useToast()
   const isAdmin = user?.rol === 'admin'
 
+  // Vista: admin tiene toggle grid/table; monitor solo grid (mi cronograma)
   const [view, setView] = useState<ViewMode>('grid')
 
   const [asignaciones, setAsignaciones] = useState<Asignacion[]>([])
@@ -41,7 +42,7 @@ export default function AsignacionesPage() {
   const [loading,      setLoading]      = useState(true)
   const [error,        setError]        = useState(false)
 
-  // Bulk modal (admin)
+  // Bulk create modal (admin)
   const [modalOpen, setModalOpen] = useState(false)
   const [monitores, setMonitores] = useState<SessionUser[]>([])
   const [salaHorarios, setSalaHorarios] = useState<Horario[]>([])
@@ -50,28 +51,34 @@ export default function AsignacionesPage() {
   const [loadingHorarios, setLoadingHorarios] = useState(false)
   const [saving, setSaving] = useState(false)
 
+  // Cell detail modal (admin click en celda de la grilla)
+  const [detailOpen, setDetailOpen] = useState(false)
+  const [detailAsignaciones, setDetailAsignaciones] = useState<Asignacion[]>([])
+  const [deletingId, setDeletingId] = useState<number | null>(null)
+
   const load = () => {
     setLoading(true); setError(false)
 
+    // Monitor: backend ya filtra a sus asignaciones; no enviamos filtros admin
     const asigParams: Record<string, number> = {}
-    if (filterSem !== '')  asigParams.semestre = filterSem as number
-    if (filterSala !== '') asigParams.sala     = filterSala as number
-    // Admin ve todo; monitor ve solo lo suyo (backend filtra)
+    if (isAdmin) {
+      if (filterSem !== '')  asigParams.semestre = filterSem as number
+      if (filterSala !== '') asigParams.sala     = filterSala as number
+    }
 
     Promise.all([
       asignacionesApi.list(Object.keys(asigParams).length > 0 ? asigParams : undefined),
-      horariosApi.list(filterSala !== '' ? (filterSala as number) : undefined),
-      semestresApi.list(),
-      salasApi.list(),
+      horariosApi.list(isAdmin && filterSala !== '' ? (filterSala as number) : undefined),
+      isAdmin ? semestresApi.list() : Promise.resolve({ data: [] as Semestre[] }),
+      isAdmin ? salasApi.list()     : Promise.resolve({ data: [] }),
     ])
       .then(([a, h, sem, s]) => {
         setAsignaciones(a.data)
         setHorariosAll(h.data)
         setSemestres(sem.data)
         setSalas(s.data as unknown as SalaR[])
-        // Auto-seleccionar semestre activo
-        if (filterSem === '') {
-          const activo = sem.data.find(x => x.activo)
+        if (isAdmin && filterSem === '') {
+          const activo = sem.data.find((x: Semestre) => x.activo)
           if (activo) setFilterSem(activo.id_semestre)
         }
       })
@@ -81,6 +88,7 @@ export default function AsignacionesPage() {
 
   useEffect(() => { load() }, [filterSem, filterSala])
 
+  // ---- Bulk create (admin) ----
   const openModal = async () => {
     setForm({ monitor: '', semestre: String(filterSem || ''), sala: '' })
     setSelectedHorarios([])
@@ -135,15 +143,28 @@ export default function AsignacionesPage() {
     }
   }
 
+  // ---- Delete (admin) ----
   const handleDelete = async (a: Asignacion) => {
-    if (!confirm('¿Eliminar esta asignación?')) return
+    if (!confirm(`¿Liberar a ${a.monitor_nombre} del turno ${a.sala_codigo} · ${a.dia_semana_display} · ${formatTime(a.hora_inicio)}–${formatTime(a.hora_fin)}?`)) return
+    setDeletingId(a.id_asignacion)
     try {
       await asignacionesApi.remove(a.id_asignacion)
-      showToast('Asignación eliminada')
+      showToast('Asignación eliminada — monitor liberado')
+      // Quita la asignación del modal de detalle también
+      setDetailAsignaciones(prev => prev.filter(x => x.id_asignacion !== a.id_asignacion))
       load()
     } catch {
       showToast('No se pudo eliminar la asignación', 'error')
+    } finally {
+      setDeletingId(null)
     }
+  }
+
+  const handleCellClick = (_slot: unknown, asigs: Asignacion[]) => {
+    if (!isAdmin) return
+    if (asigs.length === 0) return
+    setDetailAsignaciones(asigs)
+    setDetailOpen(true)
   }
 
   const semLabel = (s: Semestre) => `${s.anio}-${s.periodo}${s.activo ? ' (activo)' : ''}`
@@ -153,29 +174,33 @@ export default function AsignacionesPage() {
       <header className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-textMain flex items-center gap-2">
-            <CalendarCheck className="w-6 h-6 text-primary" /> Asignaciones
+            <CalendarCheck className="w-6 h-6 text-primary" />
+            {isAdmin ? 'Asignaciones' : 'Mi cronograma'}
           </h1>
           <p className="text-sm text-textMuted mt-1">
             {isAdmin
-              ? 'Cronograma semanal — turnos asignados a monitores'
-              : 'Mi cronograma — tus turnos aparecen resaltados'}
+              ? 'Cronograma semanal — click en una celda para liberar al monitor del turno'
+              : 'Tus turnos asignados en el semestre activo'}
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <div className="inline-flex rounded-lg border border-gray-200 p-0.5 bg-gray-50">
-            <button
-              onClick={() => setView('grid')}
-              className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded text-xs font-medium transition-colors ${view === 'grid' ? 'bg-white text-textMain shadow-sm' : 'text-textMuted hover:text-textMain'}`}
-            >
-              <LayoutGrid className="w-3.5 h-3.5" /> Grilla
-            </button>
-            <button
-              onClick={() => setView('table')}
-              className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded text-xs font-medium transition-colors ${view === 'table' ? 'bg-white text-textMain shadow-sm' : 'text-textMuted hover:text-textMain'}`}
-            >
-              <TableIcon className="w-3.5 h-3.5" /> Tabla
-            </button>
-          </div>
+          {/* Toggle solo para admin */}
+          {isAdmin && (
+            <div className="inline-flex rounded-lg border border-gray-200 p-0.5 bg-gray-50">
+              <button
+                onClick={() => setView('grid')}
+                className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded text-xs font-medium transition-colors ${view === 'grid' ? 'bg-white text-textMain shadow-sm' : 'text-textMuted hover:text-textMain'}`}
+              >
+                <LayoutGrid className="w-3.5 h-3.5" /> Grilla
+              </button>
+              <button
+                onClick={() => setView('table')}
+                className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded text-xs font-medium transition-colors ${view === 'table' ? 'bg-white text-textMain shadow-sm' : 'text-textMuted hover:text-textMain'}`}
+              >
+                <TableIcon className="w-3.5 h-3.5" /> Tabla
+              </button>
+            </div>
+          )}
           {isAdmin && (
             <Button onClick={openModal}>
               <Plus className="w-4 h-4" /> Nueva asignación
@@ -184,38 +209,61 @@ export default function AsignacionesPage() {
         </div>
       </header>
 
-      {/* Filtros */}
-      <div className="flex flex-wrap items-center gap-3">
-        <label className="text-sm font-medium text-textMain">Semestre:</label>
-        <select
-          className="rounded-lg border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
-          value={filterSem}
-          onChange={e => setFilterSem(e.target.value !== '' ? Number(e.target.value) : '')}
-        >
-          <option value="">Todos</option>
-          {semestres.map(s => (
-            <option key={s.id_semestre} value={s.id_semestre}>{semLabel(s)}</option>
-          ))}
-        </select>
+      {/* Filtros solo para admin */}
+      {isAdmin && (
+        <div className="flex flex-wrap items-center gap-3">
+          <label className="text-sm font-medium text-textMain">Semestre:</label>
+          <select
+            className="rounded-lg border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
+            value={filterSem}
+            onChange={e => setFilterSem(e.target.value !== '' ? Number(e.target.value) : '')}
+          >
+            <option value="">Todos</option>
+            {semestres.map(s => (
+              <option key={s.id_semestre} value={s.id_semestre}>{semLabel(s)}</option>
+            ))}
+          </select>
 
-        <label className="text-sm font-medium text-textMain ml-3">Sala:</label>
-        <select
-          className="rounded-lg border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
-          value={filterSala}
-          onChange={e => setFilterSala(e.target.value !== '' ? Number(e.target.value) : '')}
-        >
-          <option value="">Todas las salas</option>
-          {salas.map(s => (
-            <option key={s.id_sala} value={s.id_sala}>{s.codigo} — {s.nombre}</option>
-          ))}
-        </select>
-      </div>
+          <label className="text-sm font-medium text-textMain ml-3">Sala:</label>
+          <select
+            className="rounded-lg border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
+            value={filterSala}
+            onChange={e => setFilterSala(e.target.value !== '' ? Number(e.target.value) : '')}
+          >
+            <option value="">Todas las salas</option>
+            {salas.map(s => (
+              <option key={s.id_sala} value={s.id_sala}>{s.codigo} — {s.nombre}</option>
+            ))}
+          </select>
+        </div>
+      )}
 
       <Card>
         {loading ? (
           <Spinner />
         ) : error ? (
           <ErrorMessage onRetry={load} />
+        ) : !isAdmin ? (
+          /* Monitor: solo grilla con sus turnos. Si no tiene, empty state. */
+          asignaciones.length === 0 ? (
+            <EmptyState
+              title="Sin turnos asignados"
+              description="Aún no tienes turnos en el semestre activo. Contacta al administrador."
+            />
+          ) : (
+            <WeeklyScheduleGrid
+              horarios={asignaciones.map(a => ({
+                id_horario: a.horario,
+                sala: a.id_sala,
+                dia_semana: a.dia_semana,
+                dia_semana_display: a.dia_semana_display,
+                hora_inicio: a.hora_inicio,
+                hora_fin: a.hora_fin,
+              }))}
+              asignaciones={asignaciones}
+              highlightUserId={user?.id}
+            />
+          )
         ) : view === 'grid' ? (
           horariosAll.length === 0 ? (
             <EmptyState title="Sin horarios" description="No hay horarios para construir la grilla. Crea algunos en la página de Horarios." />
@@ -223,28 +271,29 @@ export default function AsignacionesPage() {
             <WeeklyScheduleGrid
               horarios={horariosAll}
               asignaciones={asignaciones}
-              highlightUserId={user?.rol === 'monitor' ? user.id : undefined}
+              onCellClick={handleCellClick}
             />
           )
         ) : asignaciones.length === 0 ? (
           <EmptyState
             title="Sin asignaciones"
             description="No hay asignaciones para este filtro."
-            action={isAdmin ? <Button onClick={openModal}><Plus className="w-4 h-4" /> Nueva asignación</Button> : undefined}
+            action={<Button onClick={openModal}><Plus className="w-4 h-4" /> Nueva asignación</Button>}
           />
         ) : (
+          /* Vista tabla admin */
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-gray-100">
-                  {['Monitor', 'Sala', 'Día', 'Horario', 'Semestre', ...(isAdmin ? [''] : [])].map((h, i) => (
+                  {['Monitor', 'Sala', 'Día', 'Horario', 'Semestre', ''].map((h, i) => (
                     <th key={i} className={`px-6 py-3 ${i === 5 ? 'text-right' : 'text-left'} text-xs font-medium text-textMuted uppercase tracking-wide`}>{h}</th>
                   ))}
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-50">
                 {asignaciones.map(a => (
-                  <tr key={a.id_asignacion} className={a.monitor === user?.id ? 'bg-primary/5 hover:bg-primary/10' : 'hover:bg-gray-50/50'}>
+                  <tr key={a.id_asignacion} className="hover:bg-gray-50/50">
                     <td className="px-6 py-3">
                       <div className="flex items-center gap-2">
                         <UserAvatar userId={a.monitor} name={a.monitor_nombre} size="sm" />
@@ -255,13 +304,17 @@ export default function AsignacionesPage() {
                     <td className="px-6 py-3 text-textMuted">{a.dia_semana_display || DIAS[a.dia_semana]}</td>
                     <td className="px-6 py-3 text-textMuted">{formatTime(a.hora_inicio)}–{formatTime(a.hora_fin)}</td>
                     <td className="px-6 py-3 text-textMuted">{a.semestre_label}</td>
-                    {isAdmin && (
-                      <td className="px-6 py-3 text-right">
-                        <Button variant="ghost" size="sm" onClick={() => handleDelete(a)}>
-                          <Trash2 className="w-3.5 h-3.5 text-danger" />
-                        </Button>
-                      </td>
-                    )}
+                    <td className="px-6 py-3 text-right">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => handleDelete(a)}
+                        disabled={deletingId === a.id_asignacion}
+                        title="Eliminar asignación y liberar monitor"
+                      >
+                        <Trash2 className="w-3.5 h-3.5 text-danger" />
+                      </Button>
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -269,6 +322,49 @@ export default function AsignacionesPage() {
           </div>
         )}
       </Card>
+
+      {/* Modal: detalle de celda (admin) — permite eliminar asignaciones */}
+      <Modal
+        open={detailOpen}
+        onClose={() => setDetailOpen(false)}
+        title="Asignaciones en este horario"
+        footer={
+          <Button variant="secondary" onClick={() => setDetailOpen(false)}>Cerrar</Button>
+        }
+      >
+        {detailAsignaciones.length === 0 ? (
+          <p className="text-sm text-textMuted">No quedan asignaciones en este horario.</p>
+        ) : (
+          <div className="space-y-2">
+            <p className="text-sm text-textMuted">
+              Click en el ícono de eliminar para liberar al monitor de su turno.
+            </p>
+            {detailAsignaciones.map(a => (
+              <div key={a.id_asignacion} className="flex items-center justify-between gap-3 p-3 border border-gray-100 rounded-lg">
+                <div className="flex items-center gap-3 min-w-0">
+                  <UserAvatar userId={a.monitor} name={a.monitor_nombre} size="md" />
+                  <div className="min-w-0">
+                    <p className="font-medium text-textMain truncate">{a.monitor_nombre}</p>
+                    <p className="text-xs text-textMuted">
+                      {a.sala_codigo} · {a.dia_semana_display} · {formatTime(a.hora_inicio)}–{formatTime(a.hora_fin)}
+                    </p>
+                    <p className="text-xs text-textMuted">{a.semestre_label}</p>
+                  </div>
+                </div>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => handleDelete(a)}
+                  disabled={deletingId === a.id_asignacion}
+                  title="Eliminar asignación y liberar monitor"
+                >
+                  <Trash2 className="w-4 h-4 text-danger" />
+                </Button>
+              </div>
+            ))}
+          </div>
+        )}
+      </Modal>
 
       {/* Modal bulk create (admin) */}
       <Modal
