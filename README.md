@@ -507,23 +507,31 @@ Este es el flujo más complejo del sistema. Diseñado para que los monitores **n
 
 ```mermaid
 stateDiagram-v2
-    [*] --> pendiente : Monitor crea solicitud<br/>POST /api/cambios/
-    pendiente --> con_propuestas : Admin propone 2+ opciones<br/>POST /api/cambios/{id}/proponer/
-    pendiente --> rechazada : Admin rechaza<br/>POST /api/cambios/{id}/rechazar/
-    con_propuestas --> aprobada : Monitor elige opción<br/>POST /api/cambios/{id}/elegir/<br/>(swap ejecutado)
-    con_propuestas --> rechazada : Admin rechaza después de proponer
+    [*] --> pendiente
+    pendiente --> con_propuestas : admin propone opciones
+    pendiente --> rechazada : admin rechaza
+    con_propuestas --> aprobada : monitor elige opcion
+    con_propuestas --> rechazada : admin rechaza
     aprobada --> [*]
     rechazada --> [*]
 ```
+
+| Transición | Endpoint | Quién |
+|---|---|---|
+| `[*] → pendiente` | `POST /api/cambios/` | Monitor (crea solicitud) |
+| `pendiente → con_propuestas` | `POST /api/cambios/{id}/proponer/` | Admin (al menos 2 opciones) |
+| `pendiente → rechazada` | `POST /api/cambios/{id}/rechazar/` | Admin |
+| `con_propuestas → aprobada` | `POST /api/cambios/{id}/elegir/` | Monitor solicitante (swap ejecutado) |
+| `con_propuestas → rechazada` | `POST /api/cambios/{id}/rechazar/` | Admin |
 
 **Secuencia completa del swap:**
 
 ```mermaid
 sequenceDiagram
     autonumber
-    actor M as Monitor A<br/>(solicitante)
+    actor M as Monitor_A_solicitante
     actor AD as Admin
-    actor B_user as Monitor B<br/>(reemplazo)
+    actor B_user as Monitor_B_reemplazo
     participant F as Frontend
     participant BE as Backend
     participant DB as Postgres
