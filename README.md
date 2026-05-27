@@ -876,3 +876,4 @@ El sistema utiliza RAG para fundamentar las respuestas de la IA directamente en 
 - **Juan Andrés Muñoz Zapata**
 - **Enmanuel Velásquez Romero**
 - **Juan Andrés Rojas Saavedra**
+- **Juan Felipe Gonzalez**
