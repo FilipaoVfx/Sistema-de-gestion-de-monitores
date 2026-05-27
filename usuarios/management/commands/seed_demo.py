@@ -3,10 +3,15 @@
 Idempotente: corre las veces que quieras y solo crea lo que falta.
 Crea: 1 admin, 8 monitores, 4 salas, 3 semestres, 35 horarios y 15 asignaciones
 sobre el semestre activo (2025-1).
+
+Si las asignaciones de demo ya fueron modificadas (por ejemplo via swap de
+SolicitudCambio), los conflictos de validacion se atrapan y se loggean como
+warning para que el build no falle.
 """
 from datetime import time
 
 from django.contrib.auth import get_user_model
+from django.core.exceptions import ValidationError
 from django.core.management.base import BaseCommand
 from django.db import transaction
 
@@ -184,9 +189,13 @@ class Command(BaseCommand):
         out(self.style.SUCCESS(f"Horarios creados/existentes: {horarios_creados} nuevos / {len(HORARIOS)} totales"))
 
         # 6) Asignaciones (sobre el semestre activo 2025-1)
+        # Si las asignaciones originales fueron modificadas (por swap o
+        # delete admin), saltamos las que ya no aplican en vez de romper el
+        # seed. Esto permite que el deploy sea seguro post-modificaciones.
         semestre_activo = Semestre.objects.get(anio=2025, periodo=1)
         usuarios_by_username = {u.username: u for u in Usuario.objects.filter(rol="monitor")}
         asignaciones_creadas = 0
+        asignaciones_saltadas = 0
         for username, codigo, dia, h_ini, h_fin in ASIGNACIONES:
             horario = Horario.objects.get(
                 sala=salas_by_codigo[codigo],
@@ -194,13 +203,41 @@ class Command(BaseCommand):
                 hora_inicio=h_ini,
                 hora_fin=h_fin,
             )
-            _, created = Asignacion.objects.get_or_create(
-                monitor=usuarios_by_username[username],
-                horario=horario,
-                semestre=semestre_activo,
-            )
-            asignaciones_creadas += int(created)
-        out(self.style.SUCCESS(f"Asignaciones creadas: {asignaciones_creadas} nuevas / {len(ASIGNACIONES)} totales"))
+            monitor = usuarios_by_username[username]
+
+            # Si la asignacion exacta (monitor + horario + semestre) ya existe, OK.
+            if Asignacion.objects.filter(
+                monitor=monitor, horario=horario, semestre=semestre_activo,
+            ).exists():
+                continue
+
+            # Si el horario YA ESTA ocupado por otro monitor en este semestre
+            # (swap previo), no intentamos sobrescribirlo — respetamos el
+            # estado actual del sistema.
+            if Asignacion.objects.filter(
+                horario=horario, semestre=semestre_activo,
+            ).exclude(monitor=monitor).exists():
+                asignaciones_saltadas += 1
+                out(f"Asignacion saltada (horario ya tomado por otro monitor): {username} -> {codigo} {dia} {h_ini}-{h_fin}")
+                continue
+
+            # Crea — pero si hay conflicto de horario del monitor (otro turno
+            # se cruza), atrapamos y saltamos.
+            try:
+                with transaction.atomic():
+                    Asignacion.objects.create(
+                        monitor=monitor,
+                        horario=horario,
+                        semestre=semestre_activo,
+                    )
+                asignaciones_creadas += 1
+            except ValidationError as exc:
+                asignaciones_saltadas += 1
+                msg = '; '.join(exc.messages) if hasattr(exc, 'messages') else str(exc)
+                out(f"Asignacion saltada por conflicto: {username} -> {codigo} {dia} {h_ini}-{h_fin} ({msg})")
+        out(self.style.SUCCESS(
+            f"Asignaciones: {asignaciones_creadas} creadas, {asignaciones_saltadas} saltadas / {len(ASIGNACIONES)} totales"
+        ))
 
         out(self.style.SUCCESS("\nSeed completado."))
         out("Login admin:   admin@sgmsc.edu.ec / Admin@2026")
