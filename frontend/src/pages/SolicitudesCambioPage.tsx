@@ -16,17 +16,41 @@ import { formatDate, formatTime } from '../utils/formatDate'
 import type { StatusColor } from '../utils/statusMapper'
 
 const estadoVariant: Record<string, StatusColor> = {
-  pendiente:      'yellow',
-  con_propuestas: 'blue',
-  aprobada:       'green',
-  rechazada:      'red',
+  pendiente:           'yellow',
+  con_propuestas:      'blue',
+  esperando_candidato: 'yellow',
+  aprobada:            'green',
+  rechazada:           'red',
 }
 
 const estadoLabel: Record<string, string> = {
-  pendiente:      'Pendiente',
-  con_propuestas: 'Con propuestas',
-  aprobada:       'Aprobada',
-  rechazada:      'Rechazada',
+  pendiente:           'Pendiente',
+  con_propuestas:      'Con propuestas',
+  esperando_candidato: 'Esperando candidato',
+  aprobada:            'Aprobada',
+  rechazada:           'Rechazada',
+}
+
+/** Helper: parsea detail estructurado del backend en un string legible. */
+function parseErrorDetail(e: any, fallback: string): string {
+  const data = e?.response?.data
+  let msg = data?.error || fallback
+  const detail = data?.detail
+  if (detail) {
+    if (typeof detail === 'string') {
+      msg = detail
+    } else if (Array.isArray(detail)) {
+      msg = detail.join(' · ')
+    } else if (typeof detail === 'object') {
+      const parts: string[] = []
+      for (const [field, value] of Object.entries(detail)) {
+        const txt = Array.isArray(value) ? value.join(' · ') : String(value)
+        parts.push(['swap', 'opcion', 'non_field_errors'].includes(field) ? txt : `${field}: ${txt}`)
+      }
+      if (parts.length > 0) msg = parts.join(' · ')
+    }
+  }
+  return msg
 }
 
 export default function SolicitudesCambioPage() {
@@ -161,33 +185,43 @@ export default function SolicitudesCambioPage() {
     setChoosing(true)
     try {
       await cambiosApi.elegir(chooseTarget.id_cambio, { opcion: chosen })
-      showToast('Swap ejecutado — tu turno ha sido intercambiado')
+      showToast('Opcion enviada — el candidato debe confirmar el swap')
       setChooseOpen(false)
       load()
     } catch (e: any) {
-      // Extrae el detail estructurado que devuelve el backend
-      // ({ error, detail: { swap: "..." } } o { error, detail: ["..."] })
-      const data = e?.response?.data
-      let msg = data?.error || 'Error al ejecutar swap'
-      const detail = data?.detail
-      if (detail) {
-        if (typeof detail === 'string') {
-          msg = detail
-        } else if (Array.isArray(detail)) {
-          msg = detail.join(' · ')
-        } else if (typeof detail === 'object') {
-          // Object con field -> message(s)
-          const parts: string[] = []
-          for (const [field, value] of Object.entries(detail)) {
-            const txt = Array.isArray(value) ? value.join(' · ') : String(value)
-            parts.push(field === 'swap' || field === 'opcion' ? txt : `${field}: ${txt}`)
-          }
-          if (parts.length > 0) msg = parts.join(' · ')
-        }
-      }
-      showToast(msg, 'error')
+      showToast(parseErrorDetail(e, 'Error al registrar tu eleccion'), 'error')
     } finally {
       setChoosing(false)
+    }
+  }
+
+  // ---- Candidato acepta el swap ----
+  const handleCandidatoAcepta = async (s: SolicitudCambio) => {
+    const opcionElegida = s.opciones.find(o => o.estado_candidato === 'elegida')
+    if (!opcionElegida) return
+    if (!confirm(`Vas a aceptar el swap con ${s.solicitante_nombre}. Tu turno ${opcionElegida.asignacion_swap_detalle.sala_codigo} ${opcionElegida.asignacion_swap_detalle.dia} ${formatTime(opcionElegida.asignacion_swap_detalle.hora_inicio)}-${formatTime(opcionElegida.asignacion_swap_detalle.hora_fin)} pasara a ${s.solicitante_nombre} y tu tomaras ${s.asignacion_detalle.sala_codigo} ${s.asignacion_detalle.dia} ${formatTime(s.asignacion_detalle.hora_inicio)}-${formatTime(s.asignacion_detalle.hora_fin)}. Confirmas?`)) return
+    try {
+      await cambiosApi.aceptarComoCandidato(s.id_cambio)
+      showToast('Swap ejecutado — tus turnos han sido intercambiados')
+      load()
+    } catch (e: any) {
+      showToast(parseErrorDetail(e, 'Error al confirmar el swap'), 'error')
+    }
+  }
+
+  // ---- Candidato rechaza el swap ----
+  const handleCandidatoRechaza = async (s: SolicitudCambio) => {
+    const motivo = prompt(
+      `Vas a rechazar el swap con ${s.solicitante_nombre}. ¿Algun motivo? (opcional)`,
+      '',
+    )
+    if (motivo === null) return  // cancelo
+    try {
+      await cambiosApi.rechazarComoCandidato(s.id_cambio, { motivo: motivo || undefined })
+      showToast('Swap rechazado — el solicitante podra elegir otra opcion')
+      load()
+    } catch (e: any) {
+      showToast(parseErrorDetail(e, 'Error al rechazar el swap'), 'error')
     }
   }
 
@@ -230,7 +264,7 @@ export default function SolicitudesCambioPage() {
             <ArrowLeftRight className="w-6 h-6 text-primary" /> Solicitudes de cambio
           </h1>
           <p className="text-sm text-textMuted mt-1">
-            Monitor solicita · Admin propone opciones · Monitor elige cual swap aceptar
+            Monitor solicita · Admin propone opciones · Solicitante elige · Candidato confirma swap
           </p>
         </div>
         {!isAdmin && (
@@ -250,6 +284,7 @@ export default function SolicitudesCambioPage() {
           <option value="">Todos</option>
           <option value="pendiente">Pendiente</option>
           <option value="con_propuestas">Con propuestas</option>
+          <option value="esperando_candidato">Esperando candidato</option>
           <option value="aprobada">Aprobada</option>
           <option value="rechazada">Rechazada</option>
         </select>
@@ -317,31 +352,63 @@ export default function SolicitudesCambioPage() {
                       <td className="px-4 py-3 text-textMuted max-w-xs truncate">{s.motivo || '—'}</td>
                       <td className="px-4 py-3 text-textMuted text-xs">{formatDate(s.fecha_creacion)}</td>
                       <td className="px-4 py-3 text-right">
-                        <div className="flex justify-end gap-1">
-                          {/* Admin: proponer o rechazar mientras este pendiente */}
-                          {isAdmin && s.estado === 'pendiente' && (
-                            <>
-                              <Button variant="ghost" size="sm" onClick={() => openPropose(s)} title="Proponer opciones de cambio">
-                                <Lightbulb className="w-4 h-4 text-blue-600" />
-                              </Button>
-                              <Button variant="ghost" size="sm" onClick={() => openReject(s)} title="Rechazar">
-                                <XCircle className="w-4 h-4 text-danger" />
-                              </Button>
-                            </>
-                          )}
-                          {/* Admin: rechazar tambien si ya hay propuestas */}
-                          {isAdmin && s.estado === 'con_propuestas' && (
-                            <Button variant="ghost" size="sm" onClick={() => openReject(s)} title="Rechazar">
-                              <XCircle className="w-4 h-4 text-danger" />
-                            </Button>
-                          )}
-                          {/* Monitor solicitante: elegir opcion */}
-                          {!isAdmin && esMiSolicitud && s.estado === 'con_propuestas' && (
-                            <Button size="sm" onClick={() => openChoose(s)}>
-                              <Sparkles className="w-3.5 h-3.5" /> Elegir opcion
-                            </Button>
-                          )}
-                        </div>
+                        {(() => {
+                          // Determinar si soy el candidato de la opcion elegida (esperando mi confirmacion)
+                          const opcionElegida = s.opciones.find(o => o.estado_candidato === 'elegida')
+                          const soyCandidatoElegido =
+                            !isAdmin
+                            && s.estado === 'esperando_candidato'
+                            && opcionElegida?.candidato_id === user?.id
+
+                          return (
+                            <div className="flex justify-end gap-1">
+                              {/* Admin: proponer mientras este pendiente */}
+                              {isAdmin && s.estado === 'pendiente' && (
+                                <Button variant="ghost" size="sm" onClick={() => openPropose(s)} title="Proponer opciones de cambio">
+                                  <Lightbulb className="w-4 h-4 text-blue-600" />
+                                </Button>
+                              )}
+                              {/* Admin: rechazar en cualquier estado no terminal */}
+                              {isAdmin
+                                && ['pendiente', 'con_propuestas', 'esperando_candidato'].includes(s.estado) && (
+                                <Button variant="ghost" size="sm" onClick={() => openReject(s)} title="Rechazar">
+                                  <XCircle className="w-4 h-4 text-danger" />
+                                </Button>
+                              )}
+                              {/* Solicitante: elegir opcion */}
+                              {!isAdmin && esMiSolicitud && s.estado === 'con_propuestas' && (
+                                <Button size="sm" onClick={() => openChoose(s)}>
+                                  <Sparkles className="w-3.5 h-3.5" /> Elegir opcion
+                                </Button>
+                              )}
+                              {/* Solicitante: mensaje informativo cuando esta esperando candidato */}
+                              {!isAdmin && esMiSolicitud && s.estado === 'esperando_candidato' && (
+                                <span className="text-xs text-textMuted italic">
+                                  Esperando respuesta de {opcionElegida?.candidato_nombre}…
+                                </span>
+                              )}
+                              {/* Candidato: aceptar / rechazar swap */}
+                              {soyCandidatoElegido && (
+                                <>
+                                  <Button
+                                    variant="primary" size="sm"
+                                    onClick={() => handleCandidatoAcepta(s)}
+                                    title="Aceptar el swap"
+                                  >
+                                    <CheckCircle className="w-3.5 h-3.5" /> Aceptar swap
+                                  </Button>
+                                  <Button
+                                    variant="ghost" size="sm"
+                                    onClick={() => handleCandidatoRechaza(s)}
+                                    title="Rechazar el swap"
+                                  >
+                                    <XCircle className="w-4 h-4 text-danger" />
+                                  </Button>
+                                </>
+                              )}
+                            </div>
+                          )
+                        })()}
                       </td>
                     </tr>
                   )
