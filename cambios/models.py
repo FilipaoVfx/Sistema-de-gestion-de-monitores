@@ -61,7 +61,8 @@ class SolicitudCambio(models.Model):
 	# Motivo del cambio
 	motivo = models.TextField(blank=True)
 	# Estado de la solicitud
-	estado = models.CharField(max_length=16, choices=ESTADO_CHOICES, default=PENDIENTE)
+	# max_length=24 para acomodar "esperando_candidato" (19 chars) + margen
+	estado = models.CharField(max_length=24, choices=ESTADO_CHOICES, default=PENDIENTE)
 	# Respuesta del administrador
 	respuesta = models.TextField(blank=True)
 	# Administrador que respondió
