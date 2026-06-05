@@ -70,33 +70,33 @@ Una institución educativa necesita garantizar que **cada sala de cómputo** ten
 
 ```mermaid
 graph TB
-    subgraph "Cliente"
-        BR[Navegador del Usuario<br/>admin / monitor]
+    subgraph Cliente
+        BR[Navegador admin o monitor]
     end
 
-    subgraph "Vercel (Frontend)"
-        SPA[React SPA<br/>fork/main]
-        PROXY["vercel.json proxy<br/>/_api/* → Render"]
+    subgraph Vercel
+        SPA[React SPA en fork/main]
+        PROXY[vercel.json proxy de _api]
     end
 
-    subgraph "Render (Backend)"
-        DJ[Django + DRF<br/>fork/feature/drf-api]
+    subgraph Render
+        DJ[Django + DRF en fork/feature/drf-api]
         GUN[Gunicorn worker]
-        WN[WhiteNoise<br/>static files]
+        WN[WhiteNoise static files]
     end
 
-    subgraph "Supabase"
-        PG[(PostgreSQL<br/>+ pgvector)]
-        POOL[Session Pooler<br/>IPv4]
+    subgraph Supabase
+        PG[(PostgreSQL con pgvector)]
+        POOL[Session Pooler IPv4]
     end
 
-    subgraph "Servicios externos"
+    subgraph Externos
         GEM[Google Gemini API]
-        SMTP[Gmail SMTP<br/>opcional]
+        SMTP[Gmail SMTP opcional]
     end
 
     BR -->|HTTPS| SPA
-    SPA -->|JWT Bearer<br/>requests| PROXY
+    SPA -->|JWT Bearer| PROXY
     PROXY -->|reverse proxy| DJ
     DJ --> GUN
     DJ --> WN
@@ -124,18 +124,18 @@ graph TB
 
 ```mermaid
 erDiagram
-    USUARIO ||--o{ ASIGNACION : "tiene"
-    USUARIO ||--o{ SOLICITUD_CAMBIO : "solicita"
-    USUARIO ||--o{ SOLICITUD_CAMBIO : "reemplaza"
-    USUARIO ||--o{ SOLICITUD_CAMBIO : "responde (admin)"
+    USUARIO ||--o{ ASIGNACION : tiene
+    USUARIO ||--o{ SOLICITUD_CAMBIO : solicita
+    USUARIO ||--o{ SOLICITUD_CAMBIO : reemplaza
+    USUARIO ||--o{ SOLICITUD_CAMBIO : responde
 
-    SALA ||--o{ HORARIO : "define"
-    HORARIO ||--o{ ASIGNACION : "ocupa"
-    SEMESTRE ||--o{ ASIGNACION : "vigente_en"
+    SALA ||--o{ HORARIO : define
+    HORARIO ||--o{ ASIGNACION : ocupa
+    SEMESTRE ||--o{ ASIGNACION : vigente_en
 
-    ASIGNACION ||--o{ SOLICITUD_CAMBIO : "objeto_de"
-    ASIGNACION ||--o{ OPCION_CAMBIO : "propuesta_como_swap"
-    SOLICITUD_CAMBIO ||--o{ OPCION_CAMBIO : "tiene_opciones"
+    ASIGNACION ||--o{ SOLICITUD_CAMBIO : objeto_de
+    ASIGNACION ||--o{ OPCION_CAMBIO : propuesta_como_swap
+    SOLICITUD_CAMBIO ||--o{ OPCION_CAMBIO : tiene_opciones
 
     USUARIO {
         int id PK
@@ -145,14 +145,14 @@ erDiagram
         string first_name
         string last_name
         string telefono
-        string rol "admin | monitor"
+        string rol "admin o monitor"
         string password "PBKDF2"
         bool is_active
     }
 
     SALA {
         int id_sala PK
-        string codigo UK "LAB-01..."
+        string codigo UK "ej LAB-01"
         string nombre
         int capacidad
     }
@@ -160,7 +160,7 @@ erDiagram
     HORARIO {
         int id_horario PK
         int sala FK
-        int dia_semana "1=Lun..6=Sab"
+        int dia_semana "1=Lun hasta 6=Sab"
         time hora_inicio
         time hora_fin
     }
@@ -168,7 +168,7 @@ erDiagram
     SEMESTRE {
         int id_semestre PK
         int anio
-        int periodo "1 | 2"
+        int periodo "1 o 2"
         bool activo
     }
 
@@ -184,11 +184,11 @@ erDiagram
         int id_cambio PK
         int asignacion FK
         int solicitante FK "monitor"
-        int monitor_reemplazo FK "nullable, se llena al APROBAR"
+        int monitor_reemplazo FK "nullable se llena al aprobar"
         int respondido_por FK "admin"
         string tipo "cambio_turno"
         text motivo
-        string estado "pendiente | con_propuestas | aprobada | rechazada"
+        string estado "pendiente con_propuestas aprobada o rechazada"
         text respuesta
         datetime fecha_creacion
         datetime fecha_respuesta
@@ -220,19 +220,19 @@ erDiagram
 
 ```mermaid
 flowchart LR
-    subgraph "ADMIN"
-        A1[Salas: CRUD]
-        A2[Monitores: ver, crear, listar]
-        A3[Horarios: CRUD]
-        A4[Asignaciones: CRUD bulk + delete]
-        A5[Solicitudes: ver todas, proponer, rechazar]
-        A6[Semestres: ver todos]
+    subgraph ADMIN
+        A1[Salas CRUD]
+        A2[Monitores ver crear listar]
+        A3[Horarios CRUD]
+        A4[Asignaciones CRUD bulk y delete]
+        A5[Solicitudes ver todas proponer rechazar]
+        A6[Semestres ver todos]
     end
-    subgraph "MONITOR"
+    subgraph MONITOR
         M1[Ver SUS asignaciones]
         M2[Ver SUS solicitudes]
         M3[Crear solicitud cambio]
-        M4[Elegir opción de swap]
+        M4[Elegir opcion de swap]
         M5[Ver dashboard personal]
     end
 
@@ -368,48 +368,48 @@ build.sh                # script de deploy Render: migrate + seed_demo + create_
 sequenceDiagram
     autonumber
     actor U as Usuario
-    participant F as Frontend (React)
+    participant F as Frontend_React
     participant LS as localStorage
-    participant V as Vercel proxy
-    participant B as Backend (Django)
+    participant V as Vercel_proxy
+    participant B as Backend_Django
     participant DB as Postgres
 
     Note over U,DB: Login inicial
-    U->>F: Email + Password
+    U->>F: Email y Password
     F->>V: POST /_api/api/auth/login/
     V->>B: POST /api/auth/login/
-    B->>DB: authenticate(email, password)
+    B->>DB: authenticate email password
     DB-->>B: User
-    B->>B: RefreshToken.for_user(user)<br/>+ claim rol
-    B-->>V: { access, refresh, user }
-    V-->>F: { access, refresh, user }
-    F->>LS: setItem(auth_access, auth_refresh)
-    F->>F: setUser(user)
-    F->>U: Redirect a /
+    B->>B: RefreshToken.for_user con claim rol
+    B-->>V: access refresh user
+    V-->>F: access refresh user
+    F->>LS: setItem auth_access auth_refresh
+    F->>F: setUser
+    F->>U: Redirect a home
 
     Note over U,DB: Request autenticado
-    U->>F: Click "Asignaciones"
-    F->>F: api.get('/api/asignaciones/')
-    F->>F: interceptor: Authorization: Bearer <access>
+    U->>F: Click Asignaciones
+    F->>F: api.get /api/asignaciones/
+    F->>F: interceptor Authorization Bearer access
     F->>V: GET /_api/api/asignaciones/
-    V->>B: GET /api/asignaciones/ (JWT)
+    V->>B: GET /api/asignaciones/ con JWT
     B->>B: JWTAuthentication valida access
     B->>DB: SELECT asignaciones
     DB-->>B: rows
-    B-->>F: 200 [...]
+    B-->>F: 200 lista
 
-    Note over U,DB: Access expira (1h después)
-    F->>V: GET /_api/api/salas/ (access expirado)
+    Note over U,DB: Access expira tras 1h
+    F->>V: GET /_api/api/salas/ con access expirado
     V->>B: 401 Unauthorized
     B-->>F: 401
-    F->>F: interceptor 401 → llama doRefresh()
-    F->>V: POST /_api/api/auth/refresh/<br/>{ refresh }
+    F->>F: interceptor 401 llama doRefresh
+    F->>V: POST /_api/api/auth/refresh/ con refresh
     V->>B: POST /api/auth/refresh/
-    B->>B: ROTATE_REFRESH_TOKENS → new access + refresh<br/>(viejo refresh queda blacklisted)
-    B-->>F: { access, refresh }
+    B->>B: ROTATE_REFRESH_TOKENS emite nuevo par
+    B-->>F: access refresh nuevos
     F->>LS: actualiza tokens
-    F->>F: re-ejecuta request original con new access
-    F->>V: GET /_api/api/salas/ (retry)
+    F->>F: re-ejecuta request original
+    F->>V: GET /_api/api/salas/ retry
     V->>B: 200 OK
     B-->>F: data
 ```
@@ -431,30 +431,30 @@ sequenceDiagram
     participant F as Frontend
     participant B as Backend
     participant DB as Postgres
-    participant SMTP as SMTP (opcional)
+    participant SMTP as SMTP_opcional
 
-    A->>F: Form: email, nombre, apellido, cédula, teléfono
-    F->>B: POST /api/usuarios/monitores/<br/>(Authorization: Bearer admin_access)
-    B->>B: Valida request.user.rol == ADMIN
-    B->>B: Valida unique(email), unique(cedula)
-    B->>B: _generate_temp_password() (10 chars random)
+    A->>F: Form email nombre apellido cedula telefono
+    F->>B: POST /api/usuarios/monitores/ con admin JWT
+    B->>B: Valida que rol sea ADMIN
+    B->>B: Valida unique email y cedula
+    B->>B: _generate_temp_password 10 chars random
 
     rect rgb(240, 248, 255)
-        Note over B,DB: Transacción atómica
-        B->>DB: create_user(email, cedula, rol=monitor, password=None)
-        B->>DB: user.set_password(temp_pass) + save
+        Note over B,DB: Transaccion atomica
+        B->>DB: create_user email cedula rol monitor
+        B->>DB: user.set_password temp_pass y save
     end
 
     alt SMTP configurado
         B->>SMTP: send_mail con credenciales
-        Note right of B: fail_silently=True
+        Note right of B: fail_silently True
     else SMTP no configurado
-        B->>B: usa dummy backend (no envía)
+        B->>B: usa dummy backend no envia
     end
 
-    B-->>F: 201 { ...user, temporary_password: "aB3xK9qZf2" }
-    F->>A: Modal con email + password copiables
-    A->>A: Copia y envía al monitor por canal seguro<br/>(WhatsApp, Slack, etc.)
+    B-->>F: 201 user con temporary_password
+    F->>A: Modal con email y password copiables
+    A->>A: Copia y envia al monitor por canal seguro
 ```
 
 **Por qué no usa solo email:**
@@ -472,22 +472,22 @@ sequenceDiagram
     participant B as Backend
     participant DB as Postgres
 
-    A->>F: Selecciona monitor + semestre + sala
-    F->>B: GET /api/horarios/?sala=<id>
-    B->>DB: SELECT horarios WHERE sala=<id>
-    DB-->>B: [...]
+    A->>F: Selecciona monitor semestre y sala
+    F->>B: GET /api/horarios/ filtrado por sala
+    B->>DB: SELECT horarios WHERE sala
+    DB-->>B: lista
     B-->>F: lista de horarios
     F->>A: Checkboxes de horarios disponibles
-    A->>F: Marca múltiples horarios
+    A->>F: Marca multiples horarios
 
-    F->>B: POST /api/asignaciones/bulk/<br/>{ monitor, semestre, sala, horarios: ["h:5","h:8",...] }
+    F->>B: POST /api/asignaciones/bulk/ con monitor semestre sala y tokens
     B->>B: Valida admin
 
     rect rgb(240, 248, 255)
-        Note over B,DB: Transacción atómica
+        Note over B,DB: Transaccion atomica
         loop por cada horario
-            B->>B: Asignacion(monitor, horario, semestre)
-            B->>B: full_clean() → valida no-cruce
+            B->>B: Construye Asignacion
+            B->>B: full_clean valida no cruce
             alt cruce detectado
                 B->>B: ValidationError
             else OK
@@ -495,8 +495,8 @@ sequenceDiagram
             end
         end
     end
-    B-->>F: { creadas: N }
-    F->>A: Toast "N asignaciones creadas"
+    B-->>F: cantidad creadas
+    F->>A: Toast N asignaciones creadas
 ```
 
 ---
@@ -529,70 +529,70 @@ stateDiagram-v2
 ```mermaid
 sequenceDiagram
     autonumber
-    actor M as Monitor_A_solicitante
+    actor M as Monitor_A
     actor AD as Admin
-    actor B_user as Monitor_B_reemplazo
+    actor B_user as Monitor_B
     participant F as Frontend
     participant BE as Backend
     participant DB as Postgres
 
     rect rgb(250, 245, 230)
-        Note over M,DB: PASO 1 — Monitor A solicita cambio
-        M->>F: "Quiero cambiar mi turno LAB-01 lun 8-10"
-        F->>BE: POST /api/cambios/<br/>{ asignacion: 5, motivo: "Tengo clase nueva" }
-        BE->>BE: Valida solicitante == asignacion.monitor
-        BE->>DB: INSERT SolicitudCambio<br/>estado=pendiente
-        BE-->>F: 201 { id_cambio, estado: pendiente }
-        F->>M: Toast "Solicitud enviada"
+        Note over M,DB: PASO 1 Monitor A solicita cambio
+        M->>F: Quiero cambiar mi turno LAB-01 lun 8-10
+        F->>BE: POST /api/cambios/ con asignacion y motivo
+        BE->>BE: Valida solicitante igual al dueno
+        BE->>DB: INSERT SolicitudCambio estado pendiente
+        BE-->>F: 201 con id_cambio
+        F->>M: Toast Solicitud enviada
     end
 
     rect rgb(230, 245, 250)
-        Note over AD,DB: PASO 2 — Admin revisa y propone opciones
+        Note over AD,DB: PASO 2 Admin propone opciones
         AD->>F: Abre Solicitudes
-        F->>BE: GET /api/cambios/?estado=pendiente
-        BE-->>F: [solicitud]
-        AD->>F: Click "Proponer opciones"
-        F->>BE: GET /api/cambios/{id}/candidatos/
-        BE->>DB: SELECT asignaciones del mismo semestre<br/>EXCLUDE solicitante<br/>EXCLUDE turnos en solicitudes activas
+        F->>BE: GET /api/cambios/ filtro pendiente
+        BE-->>F: lista de solicitudes
+        AD->>F: Click Proponer opciones
+        F->>BE: GET /api/cambios/id/candidatos/
+        BE->>DB: SELECT asignaciones del semestre excluyendo solicitante y bloqueadas
         DB-->>BE: candidatos
         BE-->>F: lista agrupada por monitor
-        F->>AD: Checkboxes de turnos de OTROS monitores
-        AD->>F: Marca 2 opciones:<br/>- Monitor B en LAB-02 mar 10-12<br/>- Monitor C en LAB-03 jue 14-16
-        F->>BE: POST /api/cambios/{id}/proponer/<br/>{ opciones: [12, 19] }
+        F->>AD: Checkboxes de turnos de otros monitores
+        AD->>F: Marca 2 opciones
+        F->>BE: POST /api/cambios/id/proponer/ con lista de opciones
 
         rect rgb(240, 240, 240)
-            Note over BE,DB: Transacción atómica
-            BE->>BE: Valida ≥ 2 opciones, no duplicadas
-            loop por cada opción
-                BE->>DB: INSERT OpcionCambio<br/>(solicitud, asignacion_swap, orden)
+            Note over BE,DB: Transaccion atomica
+            BE->>BE: Valida al menos 2 opciones no duplicadas
+            loop por cada opcion
+                BE->>DB: INSERT OpcionCambio
             end
-            BE->>DB: UPDATE solicitud SET estado=con_propuestas
+            BE->>DB: UPDATE solicitud estado con_propuestas
         end
-        BE-->>F: 200 { ...solicitud, opciones[] }
+        BE-->>F: 200 solicitud con opciones
     end
 
     rect rgb(230, 250, 240)
-        Note over M,DB: PASO 3 — Monitor A elige una opción
-        M->>F: Abre Solicitudes (ve "Elige opción")
-        F->>BE: GET /api/cambios/ (filtra suyas)
-        BE-->>F: [solicitud con opciones]
-        M->>F: Click "Elegir opción"
-        F->>M: Modal con 2 radio cards<br/>(avatares de B y C)
-        M->>F: Elige Opción 1: swap con Monitor B
-        F->>BE: POST /api/cambios/{id}/elegir/<br/>{ opcion: 33 }
+        Note over M,DB: PASO 3 Monitor A elige una opcion
+        M->>F: Abre Solicitudes y ve Elige opcion
+        F->>BE: GET /api/cambios/ filtra suyas
+        BE-->>F: solicitud con opciones
+        M->>F: Click Elegir opcion
+        F->>M: Modal con 2 radio cards
+        M->>F: Elige Opcion 1 swap con Monitor B
+        F->>BE: POST /api/cambios/id/elegir/ con opcion
 
         rect rgb(240, 240, 240)
-            Note over BE,DB: Swap atómico
-            BE->>BE: Valida solicitante actual == request.user
-            BE->>BE: Valida no-conflicto de horario para A en horario de B
-            BE->>BE: Valida no-conflicto de horario para B en horario de A
-            BE->>DB: UPDATE asignacion_A SET monitor=B
-            BE->>DB: UPDATE asignacion_B SET monitor=A
-            BE->>DB: UPDATE opcion SET seleccionada=true
-            BE->>DB: UPDATE solicitud SET<br/>estado=aprobada, fecha_respuesta=now()<br/>monitor_reemplazo=B
+            Note over BE,DB: Swap atomico
+            BE->>BE: Valida solicitante igual al request.user
+            BE->>BE: Valida no conflicto de horario para A en horario de B
+            BE->>BE: Valida no conflicto de horario para B en horario de A
+            BE->>DB: UPDATE asignacion_A monitor B
+            BE->>DB: UPDATE asignacion_B monitor A
+            BE->>DB: UPDATE opcion seleccionada true
+            BE->>DB: UPDATE solicitud estado aprobada
         end
-        BE-->>F: 200 { ...solicitud aprobada }
-        F->>M: Toast "Swap ejecutado"
+        BE-->>F: 200 solicitud aprobada
+        F->>M: Toast Swap ejecutado
     end
 
     Note over M,B_user: Resultado final
@@ -614,28 +614,26 @@ sequenceDiagram
 ```mermaid
 flowchart TD
     Start([Inicio]) --> Login{Login}
-    Login -->|Admin| AdminDash[Dashboard Admin<br/>KPIs globales]
-    Login -->|Monitor| MonitorDash[Dashboard Monitor<br/>Mis turnos]
+    Login -->|Admin| AdminDash[Dashboard Admin con KPIs globales]
+    Login -->|Monitor| MonitorDash[Dashboard Monitor mis turnos]
 
-    %% Admin paths
     AdminDash --> A_Salas[Gestionar Salas]
     AdminDash --> A_Mon[Gestionar Monitores]
     AdminDash --> A_Hor[Gestionar Horarios]
     AdminDash --> A_Asig[Gestionar Asignaciones]
     AdminDash --> A_Sol[Revisar Solicitudes]
 
-    A_Salas --> A_SalasCRUD[Crear / editar / eliminar salas]
-    A_Mon --> A_MonCRUD[Crear monitor<br/>password temporal]
-    A_Hor --> A_HorCRUD[Crear / eliminar horarios<br/>por sala+día+bloque]
-    A_Asig --> A_AsigCreate[Bulk: monitor+semestre+sala<br/>+ N horarios]
-    A_Asig --> A_AsigDelete[Click celda grilla<br/>→ liberar monitor]
-    A_Sol --> A_SolPropose[Proponer 2+ opciones de swap]
+    A_Salas --> A_SalasCRUD[Crear editar eliminar salas]
+    A_Mon --> A_MonCRUD[Crear monitor con password temporal]
+    A_Hor --> A_HorCRUD[Crear o eliminar horarios por sala dia bloque]
+    A_Asig --> A_AsigCreate[Bulk monitor semestre sala con N horarios]
+    A_Asig --> A_AsigDelete[Click celda grilla y liberar monitor]
+    A_Sol --> A_SolPropose[Proponer al menos 2 opciones de swap]
     A_Sol --> A_SolReject[Rechazar solicitud]
 
-    %% Monitor paths
-    MonitorDash --> M_VerTurnos[Ver mi cronograma<br/>grilla semanal]
+    MonitorDash --> M_VerTurnos[Ver mi cronograma grilla semanal]
     MonitorDash --> M_Solicitar[Solicitar cambio de turno]
-    MonitorDash --> M_Elegir[Elegir opción de swap]
+    MonitorDash --> M_Elegir[Elegir opcion de swap]
 
     M_Solicitar -->|crea| A_Sol
     A_SolPropose -->|notifica| M_Elegir
@@ -767,13 +765,13 @@ npm run dev
 
 ```mermaid
 flowchart LR
-    Dev[Developer] -->|push fork/main| GH1[GitHub fork/main]
-    Dev -->|push fork/feature-drf-api| GH2[GitHub fork/feature/drf-api]
+    Dev[Developer] -->|push a fork main| GH1[GitHub fork main]
+    Dev -->|push a fork feature drf-api| GH2[GitHub fork feature drf-api]
     GH1 -->|webhook| V[Vercel]
     GH2 -->|webhook| R[Render]
-    V -->|build & deploy| SPA[sgmsc-frontend.vercel.app]
-    R -->|build.sh| BE[sistema-de-gestion-de-monitores.onrender.com]
-    BE -->|migrate + seed_demo<br/>+ create_admin| SUP[(Supabase Postgres)]
+    V -->|build y deploy| SPA[sgmsc-frontend vercel app]
+    R -->|build.sh| BE[sistema-de-gestion-de-monitores onrender com]
+    BE -->|migrate seed_demo y create_admin| SUP[(Supabase Postgres)]
 
     style V fill:#000,color:#fff
     style R fill:#46e3b7,color:#000
@@ -876,3 +874,4 @@ El sistema utiliza RAG para fundamentar las respuestas de la IA directamente en 
 - **Juan Andrés Muñoz Zapata**
 - **Enmanuel Velásquez Romero**
 - **Juan Andrés Rojas Saavedra**
+- **Juan Felipe Gonzalez**
