@@ -63,8 +63,33 @@ export default function MonitoresPage() {
       if (res.data.temporary_password) {
         setCredentialsModal({ email: res.data.email, password: res.data.temporary_password })
       }
-    } catch {
-      showToast('Error al crear monitor', 'error')
+    } catch (e: any) {
+      // Extrae detail estructurado del backend para mostrar la causa real
+      const status = e?.response?.status
+      const data   = e?.response?.data
+      let msg = data?.error || 'Error al crear monitor'
+
+      if (status === 403 && data?.detail && typeof data.detail === 'object') {
+        // 403 con detalle del rol detectado por el backend
+        const d = data.detail
+        msg = `${data.error || 'Acceso denegado'} · Tu sesion es ${d.usuario || '?'} con rol "${d.rol_detectado || '?'}". ${d.hint || ''}`
+      } else if (data?.detail) {
+        // Otros 4xx con detail estructurado
+        const d = data.detail
+        if (typeof d === 'string') {
+          msg = d
+        } else if (Array.isArray(d)) {
+          msg = d.join(' · ')
+        } else if (typeof d === 'object') {
+          const parts: string[] = []
+          for (const [field, value] of Object.entries(d)) {
+            const txt = Array.isArray(value) ? value.join(' · ') : String(value)
+            parts.push(`${field}: ${txt}`)
+          }
+          msg = parts.join(' · ')
+        }
+      }
+      showToast(msg, 'error')
     } finally {
       setSaving(false)
     }
