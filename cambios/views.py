@@ -1,5 +1,4 @@
 from django.core.exceptions import ValidationError
-from django.db.models import Q
 from rest_framework import viewsets, permissions, status
 from rest_framework.decorators import action
 from rest_framework.exceptions import PermissionDenied
@@ -74,13 +73,10 @@ class SolicitudCambioViewSet(viewsets.ModelViewSet):
             'opciones__candidato',
         ).order_by('-fecha_creacion')
 
-        # Monitor ve: sus propias solicitudes O solicitudes donde es candidato
-        # de una opcion ELEGIDA (esperando su confirmacion).
+        # Privacidad: monitor SOLO ve solicitudes donde el es el solicitante.
+        # Admin ve todas. No exponemos solicitudes ajenas a ningun monitor.
         if user.rol == Usuario.MONITOR:
-            qs = qs.filter(
-                Q(solicitante=user)
-                | Q(opciones__candidato=user, opciones__estado_candidato=OpcionCambio.EST_ELEGIDA)
-            ).distinct()
+            qs = qs.filter(solicitante=user)
 
         estado = self.request.query_params.get('estado')
         if estado:
