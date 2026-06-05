@@ -5,35 +5,41 @@ del estado de la solicitud. Aisla esa logica del servicio para que sea facil
 auditar y testear.
 
 Estados:
-    PENDIENTE        - recien creada por el monitor solicitante
-    CON_PROPUESTAS   - el admin ha propuesto >=2 opciones de swap
-    APROBADA         - el monitor eligio una opcion y el swap fue ejecutado
-    RECHAZADA        - el admin rechazo la solicitud (terminal)
+    PENDIENTE              - recien creada por el monitor solicitante
+    CON_PROPUESTAS         - el admin propuso >=2 opciones de swap
+    ESPERANDO_CANDIDATO    - solicitante eligio opcion X, candidato debe confirmar
+    APROBADA               - candidato acepto y el swap se ejecuto (terminal)
+    RECHAZADA              - admin rechazo en cualquier punto (terminal)
 
 Transiciones permitidas:
 
-                        +-----------------------+
-                        |        PENDIENTE      |
-                        +-----------------------+
-                         |          |        |
-            propose_opts |          |        | reject
-                         v          |        |
-                +------------------+|        |
-                |  CON_PROPUESTAS  ||        |
-                +------------------+|        |
-                  |         |       |        |
-            choose|         |       |        |
-                  v         | reject|        |
-                +-------+   v       v        v
-                |APROBADA|  +-------------------+
-                +-------+   |     RECHAZADA     |
-                            +-------------------+
+      [solicitante crea]              [admin rechaza]
+            |                                |
+            v                                v
+        PENDIENTE  --propose(admin)-->  CON_PROPUESTAS  -->  RECHAZADA
+                                          |     ^
+                                          |     |
+                            choose(solic) |     | candidato_rechaza
+                                          v     |  (opcion rechazada,
+                                  ESPERANDO_CANDIDATO     puede elegir otra)
+                                          |     |
+                              candidato_  |     | reject(admin)
+                                acepta    |     v
+                                          v   RECHAZADA
+                                       APROBADA
+
+Acciones:
+    propose            - admin propone 2+ opciones (PENDIENTE -> CON_PROPUESTAS)
+    choose             - solicitante elige una opcion (CON_PROPUESTAS -> ESPERANDO_CANDIDATO)
+    candidato_acepta   - candidato confirma swap (ESPERANDO_CANDIDATO -> APROBADA)
+    candidato_rechaza  - candidato declina swap (ESPERANDO_CANDIDATO -> CON_PROPUESTAS)
+    reject             - admin rechaza la solicitud (cualquier no-terminal -> RECHAZADA)
 
 Terminal: APROBADA, RECHAZADA.
 """
 from __future__ import annotations
 
-from typing import Iterable, Optional
+from typing import Optional
 
 from django.core.exceptions import ValidationError
 
@@ -51,8 +57,18 @@ ALLOWED_TRANSITIONS: dict[str, dict[str, str]] = {
         "reject":  SolicitudCambio.RECHAZADA,
     },
     SolicitudCambio.CON_PROPUESTAS: {
-        "choose":  SolicitudCambio.APROBADA,
+        "choose":  SolicitudCambio.ESPERANDO_CANDIDATO,
         "reject":  SolicitudCambio.RECHAZADA,
+    },
+    SolicitudCambio.ESPERANDO_CANDIDATO: {
+        # candidato_acepta = swap ejecutado, solicitud queda APROBADA
+        "candidato_acepta":  SolicitudCambio.APROBADA,
+        # candidato_rechaza = la opcion elegida queda rechazada. La solicitud
+        # vuelve a CON_PROPUESTAS para que el solicitante pueda elegir otra.
+        # Si todas las opciones fueron rechazadas, el caller debe transicionar
+        # explicitamente a RECHAZADA.
+        "candidato_rechaza": SolicitudCambio.CON_PROPUESTAS,
+        "reject":            SolicitudCambio.RECHAZADA,
     },
     # Estados terminales: no admiten mas transiciones
     SolicitudCambio.APROBADA:  {},
@@ -61,9 +77,11 @@ ALLOWED_TRANSITIONS: dict[str, dict[str, str]] = {
 
 # Quien puede disparar cada accion (rol esperado)
 ACTOR_ROLES: dict[str, set[str]] = {
-    "propose": {"admin"},
-    "choose":  {"monitor"},   # ademas debe ser el solicitante
-    "reject":  {"admin"},
+    "propose":           {"admin"},
+    "choose":            {"monitor"},   # ademas debe ser el solicitante
+    "candidato_acepta":  {"monitor"},   # ademas debe ser el candidato de la opcion elegida
+    "candidato_rechaza": {"monitor"},   # ademas debe ser el candidato de la opcion elegida
+    "reject":            {"admin"},
 }
 
 # Mensajes de error consistentes
@@ -78,6 +96,9 @@ ERROR_MESSAGES = {
     ),
     "not_solicitante": (
         "Solo el monitor solicitante puede ejecutar 'choose'."
+    ),
+    "not_candidato": (
+        "Solo el monitor candidato propuesto puede aceptar o rechazar el swap."
     ),
 }
 
@@ -96,18 +117,22 @@ def next_state(current: str, action: str) -> Optional[str]:
     return ALLOWED_TRANSITIONS.get(current, {}).get(action)
 
 
-def assert_transition(solicitud: SolicitudCambio, action: str, actor=None) -> str:
+def assert_transition(solicitud: SolicitudCambio, action: str, actor=None, candidato_id=None) -> str:
     """Valida que la transicion sea legal y retorna el estado destino.
 
     Verifica:
     1. El estado actual permite esa accion.
     2. El actor tiene el rol requerido para esa accion.
     3. Para 'choose': el actor es el solicitante.
+    4. Para 'candidato_acepta'/'candidato_rechaza': el actor es el candidato
+       de la opcion (candidato_id, que debe pasarse explicitamente).
 
     Args:
         solicitud: La solicitud sobre la que se intenta la accion.
-        action: 'propose' | 'choose' | 'reject'.
+        action: 'propose' | 'choose' | 'candidato_acepta' | 'candidato_rechaza' | 'reject'.
         actor: Usuario que dispara la accion.
+        candidato_id: ID del candidato de la opcion elegida (requerido para
+            acciones candidato_*).
 
     Returns:
         El estado destino que tomara la solicitud.
@@ -143,15 +168,20 @@ def assert_transition(solicitud: SolicitudCambio, action: str, actor=None) -> st
         if actor.pk != solicitud.solicitante_id:
             raise ValidationError(ERROR_MESSAGES["not_solicitante"])
 
+    # Para acciones de candidato: verifica que el actor sea ese candidato
+    if action in ("candidato_acepta", "candidato_rechaza") and actor is not None:
+        if candidato_id is None or actor.pk != candidato_id:
+            raise ValidationError(ERROR_MESSAGES["not_candidato"])
+
     return target
 
 
-def available_actions(solicitud: SolicitudCambio, actor=None) -> list[str]:
+def available_actions(solicitud: SolicitudCambio, actor=None, candidato_id=None) -> list[str]:
     """Lista las acciones que el actor puede ejecutar sobre la solicitud."""
     result: list[str] = []
     for action in ALLOWED_TRANSITIONS.get(solicitud.estado, {}):
         try:
-            assert_transition(solicitud, action, actor)
+            assert_transition(solicitud, action, actor, candidato_id=candidato_id)
             result.append(action)
         except ValidationError:
             pass

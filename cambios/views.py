@@ -1,4 +1,5 @@
 from django.core.exceptions import ValidationError
+from django.db.models import Q
 from rest_framework import viewsets, permissions, status
 from rest_framework.decorators import action
 from rest_framework.exceptions import PermissionDenied
@@ -17,21 +18,40 @@ from .serializers import (
     RechazarSolicitudSerializer,
 )
 from .services import (
+    aceptar_como_candidato,
     crear_solicitud_cambio,
-    proponer_opciones,
     elegir_opcion,
+    proponer_opciones,
+    rechazar_como_candidato,
     rechazar_solicitud,
 )
 
 
+def _format_validation_error(exc: ValidationError, msg: str = "Operacion fallida") -> Response:
+    """Convierte un ValidationError de Django en Response 400 con detail rico."""
+    if hasattr(exc, 'message_dict'):
+        return Response(
+            {'error': msg, 'detail': exc.message_dict},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+    msgs = exc.messages if hasattr(exc, 'messages') else [str(exc)]
+    return Response(
+        {'error': msg, 'detail': msgs},
+        status=status.HTTP_400_BAD_REQUEST,
+    )
+
+
 class SolicitudCambioViewSet(viewsets.ModelViewSet):
     """
-    list      GET  /api/cambios/                   → todos (admin) o solo los propios (monitor)
-    create    POST /api/cambios/                   → monitor crea solicitud (asignacion + motivo)
-    retrieve  GET  /api/cambios/{id}/              → detalle con opciones
-    proponer  POST /api/cambios/{id}/proponer/     → admin propone 2+ opciones de swap
-    elegir    POST /api/cambios/{id}/elegir/       → monitor solicitante elige opcion
-    rechazar  POST /api/cambios/{id}/rechazar/     → admin rechaza solicitud sin proponer
+    list                GET  /api/cambios/                   admin todas, monitor: solicitante o candidato
+    create              POST /api/cambios/                   monitor crea (asignacion + motivo)
+    retrieve            GET  /api/cambios/{id}/              detalle con opciones
+    proponer            POST /api/cambios/{id}/proponer/     admin propone 2+ opciones
+    elegir              POST /api/cambios/{id}/elegir/       solicitante elige opcion
+    aceptar_candidato   POST /api/cambios/{id}/aceptar/      candidato confirma swap
+    rechazar_candidato  POST /api/cambios/{id}/rechazar-candidato/  candidato declina
+    rechazar            POST /api/cambios/{id}/rechazar/     admin rechaza
+    candidatos          GET  /api/cambios/{id}/candidatos/   admin: asignaciones elegibles
     """
     permission_classes = [permissions.IsAuthenticated]
     lookup_field = 'id_cambio'
@@ -51,10 +71,16 @@ class SolicitudCambioViewSet(viewsets.ModelViewSet):
             'opciones__asignacion_swap__horario__sala',
             'opciones__asignacion_swap__monitor',
             'opciones__asignacion_swap__semestre',
+            'opciones__candidato',
         ).order_by('-fecha_creacion')
 
+        # Monitor ve: sus propias solicitudes O solicitudes donde es candidato
+        # de una opcion ELEGIDA (esperando su confirmacion).
         if user.rol == Usuario.MONITOR:
-            qs = qs.filter(solicitante=user)
+            qs = qs.filter(
+                Q(solicitante=user)
+                | Q(opciones__candidato=user, opciones__estado_candidato=OpcionCambio.EST_ELEGIDA)
+            ).distinct()
 
         estado = self.request.query_params.get('estado')
         if estado:
@@ -108,40 +134,23 @@ class SolicitudCambioViewSet(viewsets.ModelViewSet):
 
         try:
             resultado = proponer_opciones(
-                solicitud=solicitud,
-                admin=request.user,
-                asignaciones_swap=asignaciones,
-                respuesta=respuesta,
+                solicitud=solicitud, admin=request.user,
+                asignaciones_swap=asignaciones, respuesta=respuesta,
             )
         except ValidationError as exc:
-            if hasattr(exc, 'message_dict'):
-                return Response(
-                    {'error': 'No se pudo proponer las opciones.', 'detail': exc.message_dict},
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
-            msgs = exc.messages if hasattr(exc, 'messages') else [str(exc)]
-            return Response(
-                {'error': 'No se pudo proponer las opciones.', 'detail': msgs},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+            return _format_validation_error(exc, "No se pudo proponer las opciones.")
 
         return Response(SolicitudCambioSerializer(resultado).data)
 
     @action(detail=True, methods=['post'], url_path='elegir')
     def elegir(self, request, id_cambio=None):
-        """Monitor solicitante elige una opcion de swap; se ejecuta el cambio."""
+        """Solicitante elige una opcion. El swap aun no se ejecuta; el candidato debe confirmar."""
         if request.user.rol != Usuario.MONITOR:
             return Response({'error': 'Solo el monitor solicitante puede elegir.'}, status=403)
 
         solicitud = self.get_object()
         if solicitud.solicitante_id != request.user.pk:
             return Response({'error': 'Solo el solicitante puede elegir.'}, status=403)
-
-        if solicitud.estado != SolicitudCambio.CON_PROPUESTAS:
-            return Response(
-                {'error': 'La solicitud no esta esperando eleccion.'},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
 
         serializer = ElegirOpcionSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
@@ -153,25 +162,41 @@ class SolicitudCambioViewSet(viewsets.ModelViewSet):
             return Response({'error': 'Opcion no existe.'}, status=status.HTTP_400_BAD_REQUEST)
 
         try:
-            resultado = elegir_opcion(
-                solicitud=solicitud,
-                opcion=opcion,
-                monitor=request.user,
+            resultado = elegir_opcion(solicitud=solicitud, opcion=opcion, monitor=request.user)
+        except ValidationError as exc:
+            return _format_validation_error(exc, "No se pudo registrar tu eleccion.")
+
+        return Response(SolicitudCambioSerializer(resultado).data)
+
+    @action(detail=True, methods=['post'], url_path='aceptar')
+    def aceptar(self, request, id_cambio=None):
+        """Candidato confirma el swap. Solo el monitor candidato de la opcion elegida."""
+        if request.user.rol != Usuario.MONITOR:
+            return Response({'error': 'Solo el monitor candidato puede aceptar.'}, status=403)
+
+        solicitud = self.get_object()
+        try:
+            resultado = aceptar_como_candidato(solicitud=solicitud, candidato=request.user)
+        except ValidationError as exc:
+            return _format_validation_error(exc, "No se pudo confirmar el swap.")
+
+        return Response(SolicitudCambioSerializer(resultado).data)
+
+    @action(detail=True, methods=['post'], url_path='rechazar-candidato')
+    def rechazar_candidato_action(self, request, id_cambio=None):
+        """Candidato declina el swap. La opcion queda rechazada y el solicitante puede elegir otra."""
+        if request.user.rol != Usuario.MONITOR:
+            return Response({'error': 'Solo el monitor candidato puede rechazar.'}, status=403)
+
+        solicitud = self.get_object()
+        motivo = request.data.get('motivo', '') if hasattr(request, 'data') else ''
+
+        try:
+            resultado = rechazar_como_candidato(
+                solicitud=solicitud, candidato=request.user, motivo=motivo or '',
             )
         except ValidationError as exc:
-            # Devuelve detail estructurado: si es dict, lo pasa tal cual;
-            # si es lista de mensajes, los une. Asi el frontend puede mostrar
-            # el motivo exacto del rechazo.
-            if hasattr(exc, 'message_dict'):
-                return Response(
-                    {'error': 'No se pudo ejecutar el swap.', 'detail': exc.message_dict},
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
-            msgs = exc.messages if hasattr(exc, 'messages') else [str(exc)]
-            return Response(
-                {'error': 'No se pudo ejecutar el swap.', 'detail': msgs},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+            return _format_validation_error(exc, "No se pudo rechazar.")
 
         return Response(SolicitudCambioSerializer(resultado).data)
 
@@ -223,12 +248,9 @@ class SolicitudCambioViewSet(viewsets.ModelViewSet):
 
         try:
             resultado = rechazar_solicitud(
-                solicitud=solicitud,
-                admin=request.user,
-                respuesta=respuesta,
+                solicitud=solicitud, admin=request.user, respuesta=respuesta,
             )
         except ValidationError as exc:
-            msgs = exc.messages if hasattr(exc, 'messages') else [str(exc)]
-            return Response({'error': ' '.join(msgs)}, status=400)
+            return _format_validation_error(exc, "No se pudo rechazar.")
 
         return Response(SolicitudCambioSerializer(resultado).data)

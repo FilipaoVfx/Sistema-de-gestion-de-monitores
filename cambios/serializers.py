@@ -3,19 +3,28 @@ from .models import OpcionCambio, SolicitudCambio
 
 
 class OpcionCambioSerializer(serializers.ModelSerializer):
-    """Opcion de swap propuesta — incluye detalle del turno y monitor."""
+    """Opcion de swap propuesta — incluye detalle del turno, candidato y estado."""
     asignacion_swap_detalle = serializers.SerializerMethodField()
     monitor_swap_nombre = serializers.SerializerMethodField()
     monitor_swap_email = serializers.SerializerMethodField()
+    # Campos del candidato (snapshot tomado al proponer la opcion)
+    candidato_id = serializers.IntegerField(source='candidato.pk', read_only=True, allow_null=True)
+    candidato_nombre = serializers.SerializerMethodField()
+    candidato_email = serializers.SerializerMethodField()
 
     class Meta:
         model = OpcionCambio
         fields = [
             'id_opcion', 'solicitud', 'asignacion_swap',
             'asignacion_swap_detalle', 'monitor_swap_nombre', 'monitor_swap_email',
-            'orden', 'seleccionada', 'fecha_creacion',
+            'candidato_id', 'candidato_nombre', 'candidato_email',
+            'orden', 'estado_candidato', 'seleccionada',
+            'fecha_creacion', 'fecha_decision_candidato',
         ]
-        read_only_fields = ['id_opcion', 'seleccionada', 'fecha_creacion']
+        read_only_fields = [
+            'id_opcion', 'estado_candidato', 'seleccionada',
+            'fecha_creacion', 'fecha_decision_candidato',
+        ]
 
     def get_asignacion_swap_detalle(self, obj):
         a = obj.asignacion_swap
@@ -31,11 +40,23 @@ class OpcionCambioSerializer(serializers.ModelSerializer):
         }
 
     def get_monitor_swap_nombre(self, obj):
-        m = obj.asignacion_swap.monitor
-        return m.get_full_name() or m.email
+        # En el nuevo flujo, mostramos el candidato (snapshot) en lugar del
+        # dueno actual de asignacion_swap, porque tras un swap aceptado el
+        # dueno cambia y queremos preservar la trazabilidad.
+        c = obj.candidato or obj.asignacion_swap.monitor
+        return c.get_full_name() or c.email
 
     def get_monitor_swap_email(self, obj):
-        return obj.asignacion_swap.monitor.email
+        c = obj.candidato or obj.asignacion_swap.monitor
+        return c.email
+
+    def get_candidato_nombre(self, obj):
+        if not obj.candidato:
+            return None
+        return obj.candidato.get_full_name() or obj.candidato.email
+
+    def get_candidato_email(self, obj):
+        return obj.candidato.email if obj.candidato else None
 
 
 class SolicitudCambioSerializer(serializers.ModelSerializer):
