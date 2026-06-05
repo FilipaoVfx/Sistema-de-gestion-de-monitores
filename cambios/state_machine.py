@@ -57,16 +57,15 @@ ALLOWED_TRANSITIONS: dict[str, dict[str, str]] = {
         "reject":  SolicitudCambio.RECHAZADA,
     },
     SolicitudCambio.CON_PROPUESTAS: {
-        "choose":  SolicitudCambio.ESPERANDO_CANDIDATO,
+        # Flujo simplificado: cuando el solicitante elige, el swap se ejecuta
+        # inmediatamente en BD. El admin recibe notificacion del resultado.
+        "choose":  SolicitudCambio.APROBADA,
         "reject":  SolicitudCambio.RECHAZADA,
     },
+    # Estado legacy: solicitudes que se crearon antes del 2026-06-05 y quedaron
+    # esperando confirmacion del candidato. Permitimos transicionar manualmente.
     SolicitudCambio.ESPERANDO_CANDIDATO: {
-        # candidato_acepta = swap ejecutado, solicitud queda APROBADA
         "candidato_acepta":  SolicitudCambio.APROBADA,
-        # candidato_rechaza = la opcion elegida queda rechazada. La solicitud
-        # vuelve a CON_PROPUESTAS para que el solicitante pueda elegir otra.
-        # Si todas las opciones fueron rechazadas, el caller debe transicionar
-        # explicitamente a RECHAZADA.
         "candidato_rechaza": SolicitudCambio.CON_PROPUESTAS,
         "reject":            SolicitudCambio.RECHAZADA,
     },
@@ -79,8 +78,8 @@ ALLOWED_TRANSITIONS: dict[str, dict[str, str]] = {
 ACTOR_ROLES: dict[str, set[str]] = {
     "propose":           {"admin"},
     "choose":            {"monitor"},   # ademas debe ser el solicitante
-    "candidato_acepta":  {"monitor"},   # ademas debe ser el candidato de la opcion elegida
-    "candidato_rechaza": {"monitor"},   # ademas debe ser el candidato de la opcion elegida
+    "candidato_acepta":  {"monitor"},   # legacy
+    "candidato_rechaza": {"monitor"},   # legacy
     "reject":            {"admin"},
 }
 

@@ -119,27 +119,33 @@ def proponer_opciones(*, solicitud: SolicitudCambio, admin, asignaciones_swap: I
 # ===========================================================================
 
 def elegir_opcion(*, solicitud: SolicitudCambio, opcion: OpcionCambio, monitor) -> SolicitudCambio:
-	"""Solicitante elige una opcion. El swap NO se ejecuta aun.
+	"""Solicitante elige una opcion: SWAP SE EJECUTA INMEDIATAMENTE.
 
-	Transicion: CON_PROPUESTAS --(choose, solicitante)--> ESPERANDO_CANDIDATO
+	Transicion: CON_PROPUESTAS --(choose, solicitante)--> APROBADA
 
-	Marca la opcion como `estado_candidato=ELEGIDA` y la solicitud queda
-	esperando que el candidato propuesto confirme o rechace.
+	Cuando el monitor solicitante elige una opcion, el intercambio de turnos
+	se realiza en BD de forma atomica:
+	  - asignacion_original.monitor pasa a ser el candidato propuesto
+	  - asignacion_swap.monitor     pasa a ser el solicitante
+	  - opcion.estado_candidato = ACEPTADA, seleccionada=True
+	  - resto de opciones marcadas como DESCARTADAS
+	  - solicitud queda APROBADA
+
+	El admin solo recibe la notificacion del resultado (puede verlo en su
+	dashboard / listado).
 
 	Args:
 		solicitud: Solicitud en estado CON_PROPUESTAS.
-		opcion: OpcionCambio elegida (debe pertenecer a la solicitud y estar
-			en estado EST_PENDIENTE, es decir, no haber sido ya rechazada
-			por su candidato en una iteracion previa).
+		opcion: OpcionCambio elegida (debe pertenecer a la solicitud).
 		monitor: Usuario que esta eligiendo (debe ser el solicitante).
 
 	Returns:
-		La solicitud actualizada con estado ESPERANDO_CANDIDATO.
+		La solicitud actualizada con estado APROBADA, monitor_reemplazo
+		registrado y las asignaciones intercambiadas.
 
 	Raises:
 		ValidationError: Si la transicion no es valida, si la opcion no
-			pertenece a la solicitud, o si la opcion ya fue rechazada por
-			su candidato.
+			pertenece a la solicitud, o si hay conflicto de horario real.
 	"""
 	target_state = assert_transition(solicitud, "choose", actor=monitor)
 
@@ -147,7 +153,9 @@ def elegir_opcion(*, solicitud: SolicitudCambio, opcion: OpcionCambio, monitor) 
 		raise ValidationError({
 			"opcion": "La opcion seleccionada no pertenece a esta solicitud."
 		})
-	if opcion.estado_candidato != OpcionCambio.EST_PENDIENTE:
+	if opcion.estado_candidato not in (
+		OpcionCambio.EST_PENDIENTE, OpcionCambio.EST_ELEGIDA,
+	):
 		raise ValidationError({
 			"opcion": (
 				f"Esta opcion ya fue procesada (estado: {opcion.estado_candidato}). "
@@ -155,14 +163,14 @@ def elegir_opcion(*, solicitud: SolicitudCambio, opcion: OpcionCambio, monitor) 
 			)
 		})
 
-	# Pre-validacion de conflictos de horario en el swap potencial.
-	# Si el candidato ya tiene OTRA asignacion que se cruza con el horario
-	# del solicitante, el swap no podria ejecutarse aunque acepte.
 	asignacion_original = solicitud.asignacion
 	asignacion_swap     = opcion.asignacion_swap
-	monitor_a = solicitud.solicitante
-	monitor_b = asignacion_swap.monitor
+	monitor_a = solicitud.solicitante  # dueno original del turno A
+	monitor_b = asignacion_swap.monitor  # dueno original del turno B (candidato)
 
+	# Pre-validacion de conflictos de horario reales, excluyendo ambas
+	# asignaciones del swap del query (asi no contamos como conflicto las
+	# propias asignaciones que se van a intercambiar).
 	conflicto_a = Asignacion.objects.filter(
 		monitor_id=monitor_a.pk,
 		semestre_id=asignacion_swap.semestre_id,
@@ -192,18 +200,35 @@ def elegir_opcion(*, solicitud: SolicitudCambio, opcion: OpcionCambio, monitor) 
 				f"El monitor candidato ({monitor_b.email}) ya tiene otra "
 				f"asignacion ({conflicto_b.horario.sala.codigo} "
 				f"{conflicto_b.horario.hora_inicio}-{conflicto_b.horario.hora_fin}) "
-				f"que se cruza con tu horario."
+				f"que se cruza con tu horario. Elige otra opcion."
 			)
 		})
 
+	# SWAP ATOMICO: ejecutar todo en una transaccion para que sea consistente
 	with transaction.atomic():
-		# Marca opcion como elegida (esperando confirmacion del candidato).
-		# Usamos update() para evitar full_clean() del modelo.
-		OpcionCambio.objects.filter(pk=opcion.pk).update(
-			estado_candidato=OpcionCambio.EST_ELEGIDA,
-		)
+		# Mutamos las dos asignaciones con save(validate=False) para evitar
+		# que full_clean() de Asignacion detecte falso positivo durante el
+		# estado intermedio (un monitor con 2 asignaciones).
+		asignacion_original.monitor = monitor_b
+		asignacion_original.save(validate=False)
 
+		asignacion_swap.monitor = monitor_a
+		asignacion_swap.save(validate=False)
+
+		# Marca la opcion como aceptada (ganadora) y descarta el resto
+		OpcionCambio.objects.filter(pk=opcion.pk).update(
+			estado_candidato=OpcionCambio.EST_ACEPTADA,
+			seleccionada=True,
+			fecha_decision_candidato=now(),
+		)
+		solicitud.opciones.exclude(pk=opcion.pk).filter(
+			estado_candidato__in=[OpcionCambio.EST_PENDIENTE, OpcionCambio.EST_ELEGIDA]
+		).update(estado_candidato=OpcionCambio.EST_DESCARTADA)
+
+		# Cierra la solicitud
+		solicitud.monitor_reemplazo = monitor_b
 		solicitud.estado = target_state
+		solicitud.fecha_respuesta = now()
 		solicitud.save(validate=False)
 
 	return solicitud
