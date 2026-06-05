@@ -44,6 +44,21 @@ const rawApi = axios.create({
 // UN refresh y el resto de requests espera el resultado.
 let refreshPromise: Promise<string | null> | null = null
 
+// Para evitar múltiples redirects si varios requests fallan en simultáneo
+let redirectingToLogin = false
+
+/** Limpia los tokens y redirige a login. Idempotente: solo redirige una vez. */
+function forceReauth(): void {
+  localStorage.removeItem(TOKEN_ACCESS_KEY)
+  localStorage.removeItem(TOKEN_REFRESH_KEY)
+  if (redirectingToLogin) return
+  if (typeof window === 'undefined') return
+  // Si ya estamos en login, no redirigir
+  if (window.location.pathname.includes('/usuarios/login')) return
+  redirectingToLogin = true
+  window.location.assign('/usuarios/login')
+}
+
 async function doRefresh(): Promise<string | null> {
   const refresh = localStorage.getItem(TOKEN_REFRESH_KEY)
   if (!refresh) return null
@@ -60,8 +75,6 @@ async function doRefresh(): Promise<string | null> {
     }
     return newAccess
   } catch {
-    localStorage.removeItem(TOKEN_ACCESS_KEY)
-    localStorage.removeItem(TOKEN_REFRESH_KEY)
     return null
   }
 }
@@ -98,8 +111,10 @@ api.interceptors.response.use(
         original.headers = { ...(original.headers || {}), Authorization: `Bearer ${newAccess}` }
         return api.request(original)
       }
-      // refresh fallo: limpia tokens (ya se hizo en doRefresh) y deja
-      // que el AuthProvider redirija a /usuarios/login en su me().catch
+      // Refresh fallo (refresh expirado, blacklisted, o sin refresh en localStorage):
+      // forzamos re-login para evitar que el usuario quede atascado en la app
+      // con todos los requests dando 401.
+      forceReauth()
     }
 
     return Promise.reject(err)
