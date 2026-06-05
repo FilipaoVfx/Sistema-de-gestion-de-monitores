@@ -135,7 +135,19 @@ class CrearMonitorView(generics.CreateAPIView):
         import traceback
         try:
             if request.user.rol != Usuario.ADMIN:
-                return Response({'error': 'Solo administradores pueden crear monitores.'}, status=403)
+                return Response({
+                    'error': 'Solo administradores pueden crear monitores.',
+                    'detail': {
+                        'rol_detectado': getattr(request.user, 'rol', None) or '<sin rol>',
+                        'usuario':       getattr(request.user, 'email', None),
+                        'is_staff':      getattr(request.user, 'is_staff', False),
+                        'is_superuser':  getattr(request.user, 'is_superuser', False),
+                        'hint': (
+                            "Tu sesion actual no tiene rol admin. Cierra sesion y "
+                            "vuelve a entrar con un usuario admin (admin@sgmsc.edu.ec)."
+                        ),
+                    },
+                }, status=403)
 
             serializer = self.get_serializer(data=request.data)
             serializer.is_valid(raise_exception=True)
