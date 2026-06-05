@@ -102,19 +102,34 @@ export default function AsignacionesPage() {
     }
   }
 
-  const onSalaChange = async (salaId: string) => {
-    setForm(f => ({ ...f, sala: salaId }))
-    setSelectedHorarios([])
+  /** Recarga horarios de la sala anotando ocupacion en el semestre actual. */
+  const reloadHorariosSala = async (salaId: string, semestreId: string) => {
     if (!salaId) { setSalaHorarios([]); return }
     setLoadingHorarios(true)
     try {
-      const h = await horariosApi.list(Number(salaId))
+      const h = await horariosApi.list(
+        Number(salaId),
+        semestreId ? Number(semestreId) : undefined,
+      )
       setSalaHorarios(h.data)
     } catch {
       setSalaHorarios([])
     } finally {
       setLoadingHorarios(false)
     }
+  }
+
+  const onSalaChange = async (salaId: string) => {
+    setForm(f => ({ ...f, sala: salaId }))
+    setSelectedHorarios([])
+    await reloadHorariosSala(salaId, form.semestre)
+  }
+
+  const onSemestreChange = async (semId: string) => {
+    setForm(f => ({ ...f, semestre: semId }))
+    setSelectedHorarios([])
+    // Si ya hay sala elegida, recargar para anotar ocupacion del nuevo semestre
+    if (form.sala) await reloadHorariosSala(form.sala, semId)
   }
 
   const toggleHorario = (id: number) => {
@@ -402,7 +417,7 @@ export default function AsignacionesPage() {
             <select
               className="mt-1 block w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
               value={form.semestre}
-              onChange={e => setForm(f => ({ ...f, semestre: e.target.value }))}
+              onChange={e => onSemestreChange(e.target.value)}
             >
               <option value="">Seleccionar semestre…</option>
               {semestres.map(s => (
@@ -427,26 +442,67 @@ export default function AsignacionesPage() {
 
           {form.sala && (
             <div>
-              <span className="text-sm font-medium text-textMain">Horarios disponibles</span>
+              <div className="flex items-center justify-between">
+                <span className="text-sm font-medium text-textMain">Horarios</span>
+                {form.semestre && salaHorarios.length > 0 && (
+                  <span className="text-xs text-textMuted">
+                    {salaHorarios.filter(h => !h.ocupado).length} libres /{' '}
+                    {salaHorarios.length} totales
+                  </span>
+                )}
+              </div>
+              {!form.semestre && (
+                <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg p-2 mt-2">
+                  Selecciona un semestre primero para ver cuáles horarios están libres.
+                </p>
+              )}
               {loadingHorarios ? (
                 <p className="text-sm text-textMuted mt-2">Cargando horarios…</p>
               ) : salaHorarios.length === 0 ? (
                 <p className="text-sm text-textMuted mt-2">No hay horarios para esta sala.</p>
               ) : (
-                <div className="mt-2 space-y-1 max-h-48 overflow-y-auto">
-                  {salaHorarios.map(h => (
-                    <label key={h.id_horario} className="flex items-center gap-2 cursor-pointer p-2 rounded-lg hover:bg-gray-50">
-                      <input
-                        type="checkbox"
-                        className="rounded border-gray-300 text-primary focus:ring-primary/30"
-                        checked={selectedHorarios.includes(h.id_horario)}
-                        onChange={() => toggleHorario(h.id_horario)}
-                      />
-                      <span className="text-sm text-textMain">
-                        {h.dia_semana_display || DIAS[h.dia_semana]} · {formatTime(h.hora_inicio)}–{formatTime(h.hora_fin)}
-                      </span>
-                    </label>
-                  ))}
+                <div className="mt-2 space-y-1 max-h-56 overflow-y-auto">
+                  {salaHorarios.map(h => {
+                    const isOcupado = h.ocupado === true
+                    const isMine = isOcupado && form.monitor !== '' && h.monitor_id === Number(form.monitor)
+                    return (
+                      <label
+                        key={h.id_horario}
+                        className={[
+                          'flex items-center gap-2 p-2 rounded-lg',
+                          isOcupado
+                            ? 'bg-gray-50 cursor-not-allowed opacity-70'
+                            : 'cursor-pointer hover:bg-gray-50',
+                          isMine ? 'border border-amber-200 bg-amber-50' : '',
+                        ].join(' ')}
+                      >
+                        <input
+                          type="checkbox"
+                          className="rounded border-gray-300 text-primary focus:ring-primary/30"
+                          checked={selectedHorarios.includes(h.id_horario)}
+                          onChange={() => !isOcupado && toggleHorario(h.id_horario)}
+                          disabled={isOcupado}
+                        />
+                        <span className="text-sm text-textMain flex-1">
+                          {h.dia_semana_display || DIAS[h.dia_semana]} ·{' '}
+                          {formatTime(h.hora_inicio)}–{formatTime(h.hora_fin)}
+                        </span>
+                        {isOcupado && (
+                          <span
+                            className={[
+                              'text-xs rounded-full px-2 py-0.5',
+                              isMine
+                                ? 'bg-amber-100 text-amber-800'
+                                : 'bg-gray-200 text-textMuted',
+                            ].join(' ')}
+                            title={`Ocupado por ${h.monitor_email || ''}`}
+                          >
+                            {isMine ? 'Ya es tuyo' : h.monitor_nombre || 'Ocupado'}
+                          </span>
+                        )}
+                      </label>
+                    )
+                  })}
                 </div>
               )}
             </div>
