@@ -165,7 +165,27 @@ export default function SolicitudesCambioPage() {
       setChooseOpen(false)
       load()
     } catch (e: any) {
-      showToast(e?.response?.data?.error || 'Error al ejecutar swap', 'error')
+      // Extrae el detail estructurado que devuelve el backend
+      // ({ error, detail: { swap: "..." } } o { error, detail: ["..."] })
+      const data = e?.response?.data
+      let msg = data?.error || 'Error al ejecutar swap'
+      const detail = data?.detail
+      if (detail) {
+        if (typeof detail === 'string') {
+          msg = detail
+        } else if (Array.isArray(detail)) {
+          msg = detail.join(' · ')
+        } else if (typeof detail === 'object') {
+          // Object con field -> message(s)
+          const parts: string[] = []
+          for (const [field, value] of Object.entries(detail)) {
+            const txt = Array.isArray(value) ? value.join(' · ') : String(value)
+            parts.push(field === 'swap' || field === 'opcion' ? txt : `${field}: ${txt}`)
+          }
+          if (parts.length > 0) msg = parts.join(' · ')
+        }
+      }
+      showToast(msg, 'error')
     } finally {
       setChoosing(false)
     }
