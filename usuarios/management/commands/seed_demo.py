@@ -111,118 +111,181 @@ ASIGNACIONES = [
 class Command(BaseCommand):
     help = "Crea datos de demostracion idempotentes (admin, monitores, salas, horarios, asignaciones)."
 
-    @transaction.atomic
+    # IMPORTANTE: NO usamos @transaction.atomic global. Cada seccion tiene su
+    # propio try/except con sub-transaction para que si UNA seccion falla
+    # (por ejemplo asignaciones con conflict por swap previo), las demas se
+    # mantengan. Antes el seed era todo-o-nada y un fallo en asignaciones
+    # borraba incluso los monitores recien creados.
+
     def handle(self, *args, **opts):
         Usuario = get_user_model()
         out = self.stdout.write
 
         # 1) Admin
-        admin, created = Usuario.objects.get_or_create(
-            email=ADMIN["email"],
-            defaults={
-                "username":    ADMIN["username"],
-                "cedula":      ADMIN["cedula"],
-                "rol":         "admin",
-                "first_name":  ADMIN["first_name"],
-                "last_name":   ADMIN["last_name"],
-                "telefono":    ADMIN["telefono"],
-                "is_staff":    True,
-                "is_superuser": True,
-                "is_active":   True,
-            },
-        )
-        if created:
-            admin.set_password(ADMIN["password"])
-            admin.save()
-            out(self.style.SUCCESS(f"Admin creado: {admin.email}"))
-        else:
-            out(f"Admin ya existe: {admin.email}")
+        try:
+            with transaction.atomic():
+                admin, created = Usuario.objects.get_or_create(
+                    email=ADMIN["email"],
+                    defaults={
+                        "username":    ADMIN["username"],
+                        "cedula":      ADMIN["cedula"],
+                        "rol":         "admin",
+                        "first_name":  ADMIN["first_name"],
+                        "last_name":   ADMIN["last_name"],
+                        "telefono":    ADMIN["telefono"],
+                        "is_staff":    True,
+                        "is_superuser": True,
+                        "is_active":   True,
+                    },
+                )
+                if created:
+                    admin.set_password(ADMIN["password"])
+                    admin.save()
+                    out(self.style.SUCCESS(f"Admin creado: {admin.email}"))
+                else:
+                    out(f"Admin ya existe: {admin.email}")
+        except Exception as exc:
+            out(self.style.WARNING(f"Admin saltado por error: {exc}"))
 
-        # 2) Monitores
+        # 2) Monitores - cada uno en su propia sub-transaction para que si
+        # UNO falla por unique constraint o cualquier otra cosa, los demas
+        # se sigan creando.
+        monitores_creados = 0
+        monitores_existentes = 0
+        monitores_saltados = 0
         for username, email, first, last, cedula, telefono in MONITORES:
-            user, created = Usuario.objects.get_or_create(
-                email=email,
-                defaults={
-                    "username":   username,
-                    "cedula":     cedula,
-                    "rol":        "monitor",
-                    "first_name": first,
-                    "last_name":  last,
-                    "telefono":   telefono,
-                    "is_active":  True,
-                },
-            )
-            if created:
-                user.set_password(MONITOR_PASSWORD)
-                user.save()
-                out(self.style.SUCCESS(f"Monitor creado: {email}"))
-            else:
-                out(f"Monitor ya existe: {email}")
+            try:
+                with transaction.atomic():
+                    user, created = Usuario.objects.get_or_create(
+                        email=email,
+                        defaults={
+                            "username":   username,
+                            "cedula":     cedula,
+                            "rol":        "monitor",
+                            "first_name": first,
+                            "last_name":  last,
+                            "telefono":   telefono,
+                            "is_active":  True,
+                        },
+                    )
+                    if created:
+                        user.set_password(MONITOR_PASSWORD)
+                        user.save()
+                        monitores_creados += 1
+                        out(self.style.SUCCESS(f"Monitor creado: {email}"))
+                    else:
+                        monitores_existentes += 1
+                        out(f"Monitor ya existe: {email}")
+            except Exception as exc:
+                monitores_saltados += 1
+                out(self.style.WARNING(f"Monitor saltado ({email}): {exc}"))
+        out(self.style.SUCCESS(
+            f"Monitores: {monitores_creados} nuevos, "
+            f"{monitores_existentes} ya existian, {monitores_saltados} saltados"
+        ))
 
         # 3) Salas
-        for codigo, nombre, capacidad in SALAS:
-            sala, created = Sala.objects.get_or_create(
-                codigo=codigo,
-                defaults={"nombre": nombre, "capacidad": capacidad},
-            )
-            out(self.style.SUCCESS(f"Sala creada: {codigo}") if created else f"Sala ya existe: {codigo}")
+        try:
+            with transaction.atomic():
+                for codigo, nombre, capacidad in SALAS:
+                    sala, created = Sala.objects.get_or_create(
+                        codigo=codigo,
+                        defaults={"nombre": nombre, "capacidad": capacidad},
+                    )
+                    out(self.style.SUCCESS(f"Sala creada: {codigo}") if created else f"Sala ya existe: {codigo}")
+        except Exception as exc:
+            out(self.style.WARNING(f"Salas saltadas por error: {exc}"))
 
         # 4) Semestres
-        for anio, periodo, activo in SEMESTRES:
-            sem, created = Semestre.objects.get_or_create(
-                anio=anio, periodo=periodo,
-                defaults={"activo": activo},
-            )
-            out(self.style.SUCCESS(f"Semestre creado: {anio}-{periodo}") if created else f"Semestre ya existe: {anio}-{periodo}")
+        try:
+            with transaction.atomic():
+                for anio, periodo, activo in SEMESTRES:
+                    sem, created = Semestre.objects.get_or_create(
+                        anio=anio, periodo=periodo,
+                        defaults={"activo": activo},
+                    )
+                    out(self.style.SUCCESS(f"Semestre creado: {anio}-{periodo}") if created else f"Semestre ya existe: {anio}-{periodo}")
+        except Exception as exc:
+            out(self.style.WARNING(f"Semestres saltados por error: {exc}"))
 
-        # 5) Horarios
-        salas_by_codigo = {s.codigo: s for s in Sala.objects.all()}
+        # 5) Horarios — cada uno en su propia sub-transaction
+        try:
+            salas_by_codigo = {s.codigo: s for s in Sala.objects.all()}
+        except Exception as exc:
+            out(self.style.WARNING(f"No se pudo cargar salas para horarios: {exc}"))
+            salas_by_codigo = {}
+
         horarios_creados = 0
+        horarios_saltados = 0
         for codigo, dia, h_ini, h_fin in HORARIOS:
-            _, created = Horario.objects.get_or_create(
-                sala=salas_by_codigo[codigo],
-                dia_semana=dia,
-                hora_inicio=h_ini,
-                hora_fin=h_fin,
-            )
-            horarios_creados += int(created)
-        out(self.style.SUCCESS(f"Horarios creados/existentes: {horarios_creados} nuevos / {len(HORARIOS)} totales"))
+            if codigo not in salas_by_codigo:
+                horarios_saltados += 1
+                continue
+            try:
+                with transaction.atomic():
+                    _, created = Horario.objects.get_or_create(
+                        sala=salas_by_codigo[codigo],
+                        dia_semana=dia,
+                        hora_inicio=h_ini,
+                        hora_fin=h_fin,
+                    )
+                    horarios_creados += int(created)
+            except Exception as exc:
+                horarios_saltados += 1
+                out(self.style.WARNING(
+                    f"Horario saltado ({codigo} dia={dia} {h_ini}-{h_fin}): {exc}"
+                ))
+        out(self.style.SUCCESS(
+            f"Horarios: {horarios_creados} nuevos, {horarios_saltados} saltados / {len(HORARIOS)} totales"
+        ))
 
         # 6) Asignaciones (sobre el semestre activo 2025-1)
         # Si las asignaciones originales fueron modificadas (por swap o
         # delete admin), saltamos las que ya no aplican en vez de romper el
-        # seed. Esto permite que el deploy sea seguro post-modificaciones.
-        semestre_activo = Semestre.objects.get(anio=2025, periodo=1)
+        # seed.
+        try:
+            semestre_activo = Semestre.objects.get(anio=2025, periodo=1)
+        except Semestre.DoesNotExist:
+            out(self.style.WARNING("No hay semestre 2025-1, saltamos asignaciones"))
+            self._print_login_info(out)
+            return
+
         usuarios_by_username = {u.username: u for u in Usuario.objects.filter(rol="monitor")}
         asignaciones_creadas = 0
         asignaciones_saltadas = 0
         for username, codigo, dia, h_ini, h_fin in ASIGNACIONES:
-            horario = Horario.objects.get(
-                sala=salas_by_codigo[codigo],
-                dia_semana=dia,
-                hora_inicio=h_ini,
-                hora_fin=h_fin,
-            )
+            if username not in usuarios_by_username:
+                asignaciones_saltadas += 1
+                out(f"Asignacion saltada (monitor {username} no existe)")
+                continue
+            if codigo not in salas_by_codigo:
+                asignaciones_saltadas += 1
+                continue
+            try:
+                horario = Horario.objects.get(
+                    sala=salas_by_codigo[codigo],
+                    dia_semana=dia,
+                    hora_inicio=h_ini,
+                    hora_fin=h_fin,
+                )
+            except Horario.DoesNotExist:
+                asignaciones_saltadas += 1
+                continue
+
             monitor = usuarios_by_username[username]
 
-            # Si la asignacion exacta (monitor + horario + semestre) ya existe, OK.
             if Asignacion.objects.filter(
                 monitor=monitor, horario=horario, semestre=semestre_activo,
             ).exists():
                 continue
 
-            # Si el horario YA ESTA ocupado por otro monitor en este semestre
-            # (swap previo), no intentamos sobrescribirlo — respetamos el
-            # estado actual del sistema.
             if Asignacion.objects.filter(
                 horario=horario, semestre=semestre_activo,
             ).exclude(monitor=monitor).exists():
                 asignaciones_saltadas += 1
-                out(f"Asignacion saltada (horario ya tomado por otro monitor): {username} -> {codigo} {dia} {h_ini}-{h_fin}")
+                out(f"Asignacion saltada (horario ya tomado): {username} -> {codigo} {dia} {h_ini}-{h_fin}")
                 continue
 
-            # Crea — pero si hay conflicto de horario del monitor (otro turno
-            # se cruza), atrapamos y saltamos.
             try:
                 with transaction.atomic():
                     Asignacion.objects.create(
@@ -231,14 +294,17 @@ class Command(BaseCommand):
                         semestre=semestre_activo,
                     )
                 asignaciones_creadas += 1
-            except ValidationError as exc:
+            except Exception as exc:
                 asignaciones_saltadas += 1
                 msg = '; '.join(exc.messages) if hasattr(exc, 'messages') else str(exc)
                 out(f"Asignacion saltada por conflicto: {username} -> {codigo} {dia} {h_ini}-{h_fin} ({msg})")
         out(self.style.SUCCESS(
-            f"Asignaciones: {asignaciones_creadas} creadas, {asignaciones_saltadas} saltadas / {len(ASIGNACIONES)} totales"
+            f"Asignaciones: {asignaciones_creadas} nuevas, {asignaciones_saltadas} saltadas / {len(ASIGNACIONES)} totales"
         ))
 
+        self._print_login_info(out)
+
+    def _print_login_info(self, out):
         out(self.style.SUCCESS("\nSeed completado."))
         out("Login admin:   admin@sgmsc.edu.ec / Admin@2026")
         out("Login monitor: <email>@sgmsc.edu.ec / Monitor123")
