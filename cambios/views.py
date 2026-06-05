@@ -114,8 +114,16 @@ class SolicitudCambioViewSet(viewsets.ModelViewSet):
                 respuesta=respuesta,
             )
         except ValidationError as exc:
+            if hasattr(exc, 'message_dict'):
+                return Response(
+                    {'error': 'No se pudo proponer las opciones.', 'detail': exc.message_dict},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
             msgs = exc.messages if hasattr(exc, 'messages') else [str(exc)]
-            return Response({'error': ' '.join(msgs)}, status=400)
+            return Response(
+                {'error': 'No se pudo proponer las opciones.', 'detail': msgs},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         return Response(SolicitudCambioSerializer(resultado).data)
 
@@ -151,8 +159,19 @@ class SolicitudCambioViewSet(viewsets.ModelViewSet):
                 monitor=request.user,
             )
         except ValidationError as exc:
+            # Devuelve detail estructurado: si es dict, lo pasa tal cual;
+            # si es lista de mensajes, los une. Asi el frontend puede mostrar
+            # el motivo exacto del rechazo.
+            if hasattr(exc, 'message_dict'):
+                return Response(
+                    {'error': 'No se pudo ejecutar el swap.', 'detail': exc.message_dict},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
             msgs = exc.messages if hasattr(exc, 'messages') else [str(exc)]
-            return Response({'error': ' '.join(msgs)}, status=400)
+            return Response(
+                {'error': 'No se pudo ejecutar el swap.', 'detail': msgs},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         return Response(SolicitudCambioSerializer(resultado).data)
 
