@@ -4,7 +4,7 @@ import { monitoresApi } from '../api/monitores.api'
 import type { SessionUser } from '../api/auth.api'
 import { salasApi } from '../api/salas.api'
 import { horariosApi, type Horario } from '../api/horarios.api'
-import { semestresApi, type Semestre } from '../api/semestres.api'
+// Semestre ya no se usa en este componente — el backend infiere del activo
 import { useAuth } from '../context/AuthContext'
 import { useToast } from '../components/ui/Toast'
 import Card from '../components/ui/Card'
@@ -35,18 +35,16 @@ export default function AsignacionesPage() {
 
   const [asignaciones, setAsignaciones] = useState<Asignacion[]>([])
   const [horariosAll,  setHorariosAll]  = useState<Horario[]>([])
-  const [semestres,    setSemestres]    = useState<Semestre[]>([])
   const [salas,        setSalas]        = useState<SalaR[]>([])
-  const [filterSem,    setFilterSem]    = useState<number | ''>('')
   const [filterSala,   setFilterSala]   = useState<number | ''>('')
   const [loading,      setLoading]      = useState(true)
   const [error,        setError]        = useState(false)
 
-  // Bulk create modal (admin)
+  // Bulk create modal (admin) - semestre se infiere del activo en backend
   const [modalOpen, setModalOpen] = useState(false)
   const [monitores, setMonitores] = useState<SessionUser[]>([])
   const [salaHorarios, setSalaHorarios] = useState<Horario[]>([])
-  const [form, setForm] = useState({ monitor: '', semestre: '', sala: '' })
+  const [form, setForm] = useState({ monitor: '', sala: '' })
   const [selectedHorarios, setSelectedHorarios] = useState<number[]>([])
   const [loadingHorarios, setLoadingHorarios] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -59,38 +57,32 @@ export default function AsignacionesPage() {
   const load = () => {
     setLoading(true); setError(false)
 
-    // Monitor: backend ya filtra a sus asignaciones; no enviamos filtros admin
+    // El backend filtra por semestre activo automaticamente.
+    // Monitor: backend ya filtra a sus asignaciones.
     const asigParams: Record<string, number> = {}
-    if (isAdmin) {
-      if (filterSem !== '')  asigParams.semestre = filterSem as number
-      if (filterSala !== '') asigParams.sala     = filterSala as number
+    if (isAdmin && filterSala !== '') {
+      asigParams.sala = filterSala as number
     }
 
     Promise.all([
       asignacionesApi.list(Object.keys(asigParams).length > 0 ? asigParams : undefined),
       horariosApi.list(isAdmin && filterSala !== '' ? (filterSala as number) : undefined),
-      isAdmin ? semestresApi.list() : Promise.resolve({ data: [] as Semestre[] }),
-      isAdmin ? salasApi.list()     : Promise.resolve({ data: [] }),
+      isAdmin ? salasApi.list() : Promise.resolve({ data: [] }),
     ])
-      .then(([a, h, sem, s]) => {
+      .then(([a, h, s]) => {
         setAsignaciones(a.data)
         setHorariosAll(h.data)
-        setSemestres(sem.data)
         setSalas(s.data as unknown as SalaR[])
-        if (isAdmin && filterSem === '') {
-          const activo = sem.data.find((x: Semestre) => x.activo)
-          if (activo) setFilterSem(activo.id_semestre)
-        }
       })
       .catch(() => setError(true))
       .finally(() => setLoading(false))
   }
 
-  useEffect(() => { load() }, [filterSem, filterSala])
+  useEffect(() => { load() }, [filterSala])
 
   // ---- Bulk create (admin) ----
   const openModal = async () => {
-    setForm({ monitor: '', semestre: String(filterSem || ''), sala: '' })
+    setForm({ monitor: '', sala: '' })
     setSelectedHorarios([])
     setSalaHorarios([])
     setModalOpen(true)
@@ -102,15 +94,12 @@ export default function AsignacionesPage() {
     }
   }
 
-  /** Recarga horarios de la sala anotando ocupacion en el semestre actual. */
-  const reloadHorariosSala = async (salaId: string, semestreId: string) => {
+  /** Recarga horarios de la sala. El backend anota ocupacion con el semestre activo. */
+  const reloadHorariosSala = async (salaId: string) => {
     if (!salaId) { setSalaHorarios([]); return }
     setLoadingHorarios(true)
     try {
-      const h = await horariosApi.list(
-        Number(salaId),
-        semestreId ? Number(semestreId) : undefined,
-      )
+      const h = await horariosApi.list(Number(salaId))
       setSalaHorarios(h.data)
     } catch {
       setSalaHorarios([])
@@ -122,14 +111,7 @@ export default function AsignacionesPage() {
   const onSalaChange = async (salaId: string) => {
     setForm(f => ({ ...f, sala: salaId }))
     setSelectedHorarios([])
-    await reloadHorariosSala(salaId, form.semestre)
-  }
-
-  const onSemestreChange = async (semId: string) => {
-    setForm(f => ({ ...f, semestre: semId }))
-    setSelectedHorarios([])
-    // Si ya hay sala elegida, recargar para anotar ocupacion del nuevo semestre
-    if (form.sala) await reloadHorariosSala(form.sala, semId)
+    await reloadHorariosSala(salaId)
   }
 
   const toggleHorario = (id: number) => {
@@ -139,12 +121,12 @@ export default function AsignacionesPage() {
   }
 
   const handleSave = async () => {
-    if (!form.monitor || !form.semestre || !form.sala || selectedHorarios.length === 0) return
+    if (!form.monitor || !form.sala || selectedHorarios.length === 0) return
     setSaving(true)
     try {
+      // semestre se infiere automaticamente del activo en backend
       const res = await asignacionesApi.bulk({
         monitor:  Number(form.monitor),
-        semestre: Number(form.semestre),
         sala:     Number(form.sala),
         horarios: selectedHorarios.map(id => `h:${id}`),
       })
@@ -211,7 +193,6 @@ export default function AsignacionesPage() {
     setDetailOpen(true)
   }
 
-  const semLabel = (s: Semestre) => `${s.anio}-${s.periodo}${s.activo ? ' (activo)' : ''}`
 
   return (
     <div className="space-y-6">
@@ -253,22 +234,10 @@ export default function AsignacionesPage() {
         </div>
       </header>
 
-      {/* Filtros solo para admin */}
+      {/* Filtros solo para admin - el semestre se infiere del activo */}
       {isAdmin && (
         <div className="flex flex-wrap items-center gap-3">
-          <label className="text-sm font-medium text-textMain">Semestre:</label>
-          <select
-            className="rounded-lg border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
-            value={filterSem}
-            onChange={e => setFilterSem(e.target.value !== '' ? Number(e.target.value) : '')}
-          >
-            <option value="">Todos</option>
-            {semestres.map(s => (
-              <option key={s.id_semestre} value={s.id_semestre}>{semLabel(s)}</option>
-            ))}
-          </select>
-
-          <label className="text-sm font-medium text-textMain ml-3">Sala:</label>
+          <label className="text-sm font-medium text-textMain">Sala:</label>
           <select
             className="rounded-lg border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
             value={filterSala}
@@ -330,8 +299,8 @@ export default function AsignacionesPage() {
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-gray-100">
-                  {['Monitor', 'Sala', 'Día', 'Horario', 'Semestre', ''].map((h, i) => (
-                    <th key={i} className={`px-6 py-3 ${i === 5 ? 'text-right' : 'text-left'} text-xs font-medium text-textMuted uppercase tracking-wide`}>{h}</th>
+                  {['Monitor', 'Sala', 'Día', 'Horario', ''].map((h, i) => (
+                    <th key={i} className={`px-6 py-3 ${i === 4 ? 'text-right' : 'text-left'} text-xs font-medium text-textMuted uppercase tracking-wide`}>{h}</th>
                   ))}
                 </tr>
               </thead>
@@ -347,7 +316,6 @@ export default function AsignacionesPage() {
                     <td className="px-6 py-3 text-textMuted font-mono">{a.sala_codigo}</td>
                     <td className="px-6 py-3 text-textMuted">{a.dia_semana_display || DIAS[a.dia_semana]}</td>
                     <td className="px-6 py-3 text-textMuted">{formatTime(a.hora_inicio)}–{formatTime(a.hora_fin)}</td>
-                    <td className="px-6 py-3 text-textMuted">{a.semestre_label}</td>
                     <td className="px-6 py-3 text-right">
                       <Button
                         variant="ghost"
@@ -442,20 +410,6 @@ export default function AsignacionesPage() {
           </label>
 
           <label className="block">
-            <span className="text-sm font-medium text-textMain">Semestre</span>
-            <select
-              className="mt-1 block w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
-              value={form.semestre}
-              onChange={e => onSemestreChange(e.target.value)}
-            >
-              <option value="">Seleccionar semestre…</option>
-              {semestres.map(s => (
-                <option key={s.id_semestre} value={s.id_semestre}>{semLabel(s)}</option>
-              ))}
-            </select>
-          </label>
-
-          <label className="block">
             <span className="text-sm font-medium text-textMain">Sala</span>
             <select
               className="mt-1 block w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
@@ -473,18 +427,13 @@ export default function AsignacionesPage() {
             <div>
               <div className="flex items-center justify-between">
                 <span className="text-sm font-medium text-textMain">Horarios</span>
-                {form.semestre && salaHorarios.length > 0 && (
+                {salaHorarios.length > 0 && (
                   <span className="text-xs text-textMuted">
                     {salaHorarios.filter(h => !h.ocupado).length} libres /{' '}
                     {salaHorarios.length} totales
                   </span>
                 )}
               </div>
-              {!form.semestre && (
-                <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg p-2 mt-2">
-                  Selecciona un semestre primero para ver cuáles horarios están libres.
-                </p>
-              )}
               {loadingHorarios ? (
                 <p className="text-sm text-textMuted mt-2">Cargando horarios…</p>
               ) : salaHorarios.length === 0 ? (

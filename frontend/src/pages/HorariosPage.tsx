@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { horariosApi, type Horario } from '../api/horarios.api'
 import { salasApi } from '../api/salas.api'
 import { asignacionesApi, type Asignacion } from '../api/asignaciones.api'
-import { semestresApi, type Semestre } from '../api/semestres.api'
+// El semestre se infiere del activo en backend, no se elige aqui
 import { useAuth } from '../context/AuthContext'
 import { useToast } from '../components/ui/Toast'
 import Card from '../components/ui/Card'
@@ -30,10 +30,8 @@ export default function HorariosPage() {
   const [view, setView]     = useState<ViewMode>('grid')
   const [horarios, setHorarios] = useState<Horario[]>([])
   const [salas, setSalas]       = useState<SalaR[]>([])
-  const [semestres, setSemestres] = useState<Semestre[]>([])
   const [asignaciones, setAsignaciones] = useState<Asignacion[]>([])
   const [filterSala, setFilterSala] = useState<number | ''>('')
-  const [filterSem, setFilterSem]   = useState<number | ''>('')
   const [loading, setLoading] = useState(true)
   const [error, setError]     = useState(false)
 
@@ -44,28 +42,22 @@ export default function HorariosPage() {
 
   const load = () => {
     setLoading(true); setError(false)
+    // Backend usa semestre activo automaticamente para filtrar asignaciones
     Promise.all([
       horariosApi.list(filterSala !== '' ? filterSala : undefined),
       salasApi.list(),
-      semestresApi.list(),
-      asignacionesApi.list(filterSem !== '' ? { semestre: filterSem as number, ...(filterSala !== '' ? { sala: filterSala as number } : {}) } : (filterSala !== '' ? { sala: filterSala as number } : undefined)),
+      asignacionesApi.list(filterSala !== '' ? { sala: filterSala as number } : undefined),
     ])
-      .then(([h, s, sem, a]) => {
+      .then(([h, s, a]) => {
         setHorarios(h.data)
         setSalas(s.data as unknown as SalaR[])
-        setSemestres(sem.data)
         setAsignaciones(a.data)
-        // Auto-seleccionar semestre activo si no hay filtro aun
-        if (filterSem === '') {
-          const activo = sem.data.find(x => x.activo)
-          if (activo) setFilterSem(activo.id_semestre)
-        }
       })
       .catch(() => setError(true))
       .finally(() => setLoading(false))
   }
 
-  useEffect(() => { load() }, [filterSala, filterSem])
+  useEffect(() => { load() }, [filterSala])
 
   const handleSave = async () => {
     if (!form.sala) return
@@ -147,20 +139,9 @@ export default function HorariosPage() {
             <option key={s.id_sala} value={s.id_sala}>{s.codigo} — {s.nombre}</option>
           ))}
         </select>
-
-        <label className="text-sm font-medium text-textMain ml-3">Semestre:</label>
-        <select
-          className="rounded-lg border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
-          value={filterSem}
-          onChange={e => setFilterSem(e.target.value !== '' ? Number(e.target.value) : '')}
-        >
-          <option value="">Todos</option>
-          {semestres.map(s => (
-            <option key={s.id_semestre} value={s.id_semestre}>
-              {s.anio}-{s.periodo}{s.activo ? ' (activo)' : ''}
-            </option>
-          ))}
-        </select>
+        <span className="text-xs text-textMuted ml-2 italic">
+          Mostrando asignaciones del semestre activo
+        </span>
       </div>
 
       <Card>

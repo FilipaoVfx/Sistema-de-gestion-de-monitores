@@ -7,8 +7,7 @@ export interface Horario {
   dia_semana_display: string
   hora_inicio: string
   hora_fin: string
-  /** Campos opcionales — solo presentes cuando GET /api/horarios incluye ?semestre=X.
-   *  Indican quien tiene este horario asignado en ese semestre, si aplica. */
+  /** Info de ocupacion en el semestre activo (la maneja el backend automaticamente). */
   asignacion_id?: number | null
   monitor_id?: number | null
   monitor_nombre?: string | null
@@ -17,12 +16,10 @@ export interface Horario {
 }
 
 export const horariosApi = {
-  /** Lista horarios. Si pasas `semestre`, cada horario incluye info de
-   *  ocupacion (monitor_*, ocupado, asignacion_id) en ese semestre. */
-  list: (salaId?: number, semestreId?: number) => {
+  /** Lista horarios con info de ocupacion en el semestre activo (auto). */
+  list: (salaId?: number) => {
     const params: Record<string, number> = {}
-    if (salaId !== undefined)     params.sala     = salaId
-    if (semestreId !== undefined) params.semestre = semestreId
+    if (salaId !== undefined) params.sala = salaId
     return api.get<Horario[]>('/api/horarios/', { params })
   },
   get:    (id: number)          => api.get<Horario>(`/api/horarios/${id}/`),

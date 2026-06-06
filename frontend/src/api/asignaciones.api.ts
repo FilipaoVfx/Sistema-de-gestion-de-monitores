@@ -20,13 +20,16 @@ export interface Asignacion {
 
 export interface CrearAsignacionesBulkData {
   monitor: number
-  semestre: number
+  /** Opcional: si no se envia, el backend usa el semestre activo automaticamente. */
+  semestre?: number
   sala: number
   horarios: string[]  // tokens: "h:<id>" o "n:<dia>|<HH:MM>|<HH:MM>"
 }
 
 export const asignacionesApi = {
-  list: (params?: { semestre?: number; sala?: number; monitor?: number }) =>
+  /** El backend filtra por semestre activo automaticamente. Pasa
+   *  `all_semesters: 1` solo si quieres incluir historicos. */
+  list: (params?: { sala?: number; monitor?: number; all_semesters?: number }) =>
     api.get<Asignacion[]>('/api/asignaciones/', { params }),
 
   get: (id: number) => api.get<Asignacion>(`/api/asignaciones/${id}/`),
