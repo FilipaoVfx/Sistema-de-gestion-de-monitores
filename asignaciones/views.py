@@ -46,32 +46,76 @@ class AsignacionViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=['post'], url_path='bulk')
     def bulk_create(self, request):
-        """Crea asignaciones a partir de tokens de horario (misma lógica que el formulario HTMX)."""
-        if request.user.rol != Usuario.ADMIN:
-            return Response({'error': 'Solo administradores pueden crear asignaciones.'}, status=403)
-
-        serializer = CrearAsignacionesSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-        data = serializer.validated_data
-
+        """Crea asignaciones a partir de tokens de horario."""
+        # Outer try/except como red de seguridad
+        import traceback
         try:
-            monitor = Usuario.objects.get(pk=data['monitor'], rol=Usuario.MONITOR)
-        except Usuario.DoesNotExist:
-            return Response({'error': 'Monitor no encontrado.'}, status=400)
-        try:
-            semestre = Semestre.objects.get(pk=data['semestre'])
-        except Semestre.DoesNotExist:
-            return Response({'error': 'Semestre no encontrado.'}, status=400)
+            if request.user.rol != Usuario.ADMIN:
+                return Response({
+                    'error': 'Solo administradores pueden crear asignaciones.',
+                    'detail': {
+                        'rol_detectado': getattr(request.user, 'rol', None) or '<sin rol>',
+                        'usuario':       getattr(request.user, 'email', None),
+                        'is_staff':      getattr(request.user, 'is_staff', False),
+                        'is_superuser':  getattr(request.user, 'is_superuser', False),
+                        'hint': (
+                            "Tu sesion actual no tiene rol admin. Cierra sesion y "
+                            "vuelve a entrar con un usuario admin (admin@sgmsc.edu.ec)."
+                        ),
+                    },
+                }, status=403)
 
-        try:
-            creadas = crear_asignaciones(
-                monitor=monitor,
-                semestre=semestre,
-                sala_id=data['sala'],
-                seleccion_tokens=data['horarios'],
+            serializer = CrearAsignacionesSerializer(data=request.data)
+            serializer.is_valid(raise_exception=True)
+            data = serializer.validated_data
+
+            try:
+                monitor = Usuario.objects.get(pk=data['monitor'], rol=Usuario.MONITOR)
+            except Usuario.DoesNotExist:
+                return Response(
+                    {'error': 'Monitor no encontrado.', 'detail': {'monitor_id': data['monitor']}},
+                    status=400,
+                )
+            try:
+                semestre = Semestre.objects.get(pk=data['semestre'])
+            except Semestre.DoesNotExist:
+                return Response(
+                    {'error': 'Semestre no encontrado.', 'detail': {'semestre_id': data['semestre']}},
+                    status=400,
+                )
+
+            try:
+                creadas = crear_asignaciones(
+                    monitor=monitor,
+                    semestre=semestre,
+                    sala_id=data['sala'],
+                    seleccion_tokens=data['horarios'],
+                )
+            except ValidationError as exc:
+                if hasattr(exc, 'message_dict'):
+                    return Response(
+                        {'error': 'No se pudieron crear las asignaciones.', 'detail': exc.message_dict},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+                msgs = exc.messages if hasattr(exc, 'messages') else [str(exc)]
+                return Response(
+                    {'error': 'No se pudieron crear las asignaciones.', 'detail': msgs},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            return Response({'creadas': creadas}, status=status.HTTP_201_CREATED)
+
+        except Exception as exc:
+            # Cualquier excepcion no prevista se reporta con type+msg+traceback
+            # corto para diagnostico (en lugar de un 500 HTML opaco).
+            return Response(
+                {
+                    'error': 'Error inesperado al crear asignaciones',
+                    'detail': {
+                        'type':      type(exc).__name__,
+                        'msg':       str(exc),
+                        'traceback': traceback.format_exc()[-1500:],
+                    },
+                },
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
-        except ValidationError as exc:
-            msgs = exc.messages if hasattr(exc, 'messages') else [str(exc)]
-            return Response({'error': ' '.join(msgs)}, status=400)
-
-        return Response({'creadas': creadas}, status=status.HTTP_201_CREATED)
