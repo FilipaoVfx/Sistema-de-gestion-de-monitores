@@ -1,13 +1,20 @@
 """Carga datos de demostracion para SGMSC.
 
 Idempotente: corre las veces que quieras y solo crea lo que falta.
-Crea: 1 admin, 8 monitores, 4 salas, 3 semestres, 35 horarios y 15 asignaciones
+Crea: 1 admin, 3 monitores, 4 salas, 3 semestres, 35 horarios y 6 asignaciones
 sobre el semestre activo (2025-1).
 
 Si las asignaciones de demo ya fueron modificadas (por ejemplo via swap de
 SolicitudCambio), los conflictos de validacion se atrapan y se loggean como
 warning para que el build no falle.
+
+Modo PURGE: si la env var DEMO_PURGE=1 esta seteada en Render, el seed
+primero BORRA TODOS los usuarios con rol monitor (cascade borra sus
+asignaciones, solicitudes y opciones), y todas las solicitudes huerfanas,
+y despues vuelve a crear el set limpio. Util para limpiar BD desordenada
+sin tener que tocar Supabase manualmente.
 """
+import os
 from datetime import time
 
 from django.contrib.auth import get_user_model
@@ -16,6 +23,7 @@ from django.core.management.base import BaseCommand
 from django.db import transaction
 
 from asignaciones.models import Asignacion
+from cambios.models import OpcionCambio, SolicitudCambio
 from horarios.models import Horario
 from salas.models import Sala
 from semestres.models import Semestre
@@ -31,15 +39,12 @@ ADMIN = {
     "password": "Admin@2026",
 }
 
+# Set minimo de monitores para un despliegue limpio. Si necesitas mas,
+# extiende esta lista (los nombres pueden ser cualquier subconjunto).
 MONITORES = [
     ("monitor_juan",   "juan.rodriguez@sgmsc.edu.ec",  "Juan",   "Rodriguez", "1722345678", "+593-999111111"),
     ("monitor_maria",  "maria.garcia@sgmsc.edu.ec",    "Maria",  "Garcia",    "1722345679", "+593-999111112"),
     ("monitor_carlos", "carlos.lopez@sgmsc.edu.ec",    "Carlos", "Lopez",     "1722345680", "+593-999111113"),
-    ("monitor_ana",    "ana.torres@sgmsc.edu.ec",      "Ana",    "Torres",    "1722345681", "+593-999111114"),
-    ("monitor_luis",   "luis.morales@sgmsc.edu.ec",    "Luis",   "Morales",   "1722345682", "+593-999111115"),
-    ("monitor_sofia",  "sofia.diaz@sgmsc.edu.ec",      "Sofia",  "Diaz",      "1722345683", "+593-999111116"),
-    ("monitor_diego",  "diego.ramirez@sgmsc.edu.ec",   "Diego",  "Ramirez",   "1722345684", "+593-999111117"),
-    ("monitor_lucia",  "lucia.sanchez@sgmsc.edu.ec",   "Lucia",  "Sanchez",   "1722345685", "+593-999111118"),
 ]
 MONITOR_PASSWORD = "Monitor123"
 
@@ -88,7 +93,7 @@ HORARIOS = (
 )
 
 # (username_monitor, codigo_sala, dia_semana, hora_inicio, hora_fin)
-# Asignaciones para el semestre activo (2025-1).
+# Asignaciones para el semestre activo (2025-1) usando solo los 3 monitores.
 ASIGNACIONES = [
     ("monitor_juan",   "LAB-01", 1, time(8, 0),  time(10, 0)),
     ("monitor_juan",   "LAB-01", 1, time(10, 0), time(12, 0)),
@@ -96,15 +101,6 @@ ASIGNACIONES = [
     ("monitor_maria",  "LAB-01", 2, time(8, 0),  time(10, 0)),
     ("monitor_carlos", "LAB-02", 1, time(10, 0), time(12, 0)),
     ("monitor_carlos", "LAB-02", 1, time(14, 0), time(16, 0)),
-    ("monitor_ana",    "LAB-02", 2, time(8, 0),  time(10, 0)),
-    ("monitor_ana",    "LAB-02", 2, time(10, 0), time(12, 0)),
-    ("monitor_luis",   "LAB-03", 1, time(8, 0),  time(10, 0)),
-    ("monitor_luis",   "LAB-03", 2, time(10, 0), time(12, 0)),
-    ("monitor_sofia",  "LAB-03", 3, time(14, 0), time(16, 0)),
-    ("monitor_sofia",  "LAB-03", 4, time(8, 0),  time(10, 0)),
-    ("monitor_diego",  "LAB-04", 1, time(9, 0),  time(11, 0)),
-    ("monitor_diego",  "LAB-04", 3, time(14, 0), time(16, 0)),
-    ("monitor_lucia",  "LAB-04", 5, time(9, 0),  time(11, 0)),
 ]
 
 
@@ -120,6 +116,30 @@ class Command(BaseCommand):
     def handle(self, *args, **opts):
         Usuario = get_user_model()
         out = self.stdout.write
+
+        # 0) PURGE opcional - solo si DEMO_PURGE=1
+        # Borra solicitudes/opciones/asignaciones huerfanas y luego TODOS los
+        # usuarios con rol monitor. Cascade del modelo limpia los hijos.
+        # NO toca admins, salas, horarios ni semestres.
+        if os.environ.get("DEMO_PURGE") == "1":
+            out(self.style.WARNING("DEMO_PURGE=1 detectado: limpiando datos previos..."))
+            try:
+                with transaction.atomic():
+                    # Solicitudes y opciones primero (por si alguna ya esta huerfana)
+                    n_opciones = OpcionCambio.objects.all().delete()[0]
+                    n_solicitudes = SolicitudCambio.objects.all().delete()[0]
+                    # Asignaciones (cascade tambien al borrar monitores)
+                    n_asignaciones = Asignacion.objects.all().delete()[0]
+                    # Monitores
+                    n_monitores = Usuario.objects.filter(rol="monitor").delete()[0]
+                    out(self.style.WARNING(
+                        f"  Purgados: {n_monitores} monitores, "
+                        f"{n_asignaciones} asignaciones, "
+                        f"{n_solicitudes} solicitudes, "
+                        f"{n_opciones} opciones"
+                    ))
+            except Exception as exc:
+                out(self.style.WARNING(f"Purge fallo: {exc}"))
 
         # 1) Admin
         try:
