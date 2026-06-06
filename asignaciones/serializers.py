@@ -32,9 +32,17 @@ class AsignacionSerializer(serializers.ModelSerializer):
 
 
 class CrearAsignacionesSerializer(serializers.Serializer):
-    """Serializer para la acción de creación masiva vía tokens de horario."""
+    """Serializer para la acción de creación masiva vía tokens de horario.
+
+    NOTA: el campo `semestre` ya no se acepta desde el cliente. El backend usa
+    automaticamente el semestre activo (Semestre.objects.filter(activo=True)).
+    El campo se conserva como opcional/ignored para no romper clientes viejos.
+    """
     monitor = serializers.IntegerField(help_text="PK del monitor (Usuario)")
-    semestre = serializers.IntegerField(help_text="PK del semestre")
+    semestre = serializers.IntegerField(
+        required=False, allow_null=True,
+        help_text="DEPRECATED: ignorado. El backend usa el semestre activo automaticamente.",
+    )
     sala = serializers.IntegerField(help_text="PK de la sala")
     horarios = serializers.ListField(
         child=serializers.CharField(),

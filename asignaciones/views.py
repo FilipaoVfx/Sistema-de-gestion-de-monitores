@@ -26,15 +26,18 @@ class AsignacionViewSet(viewsets.ModelViewSet):
         user = self.request.user
         qs = Asignacion.objects.select_related(
             'monitor', 'horario__sala', 'semestre'
-        ).order_by('semestre__anio', 'semestre__periodo', 'horario__dia_semana', 'horario__hora_inicio')
+        ).order_by('horario__dia_semana', 'horario__hora_inicio')
 
         if user.rol == Usuario.MONITOR:
             qs = qs.filter(monitor=user)
 
-        # Filtros opcionales
-        semestre_id = self.request.query_params.get('semestre')
-        if semestre_id:
-            qs = qs.filter(semestre_id=semestre_id)
+        # Filtro automatico por semestre activo. El cliente ya no tiene que
+        # pasar ?semestre=X - asumimos siempre el activo.
+        # Si el caller necesita ver TODOS los semestres, puede pasar ?all_semesters=1.
+        if not self.request.query_params.get('all_semesters'):
+            qs = qs.filter(semestre__activo=True)
+
+        # Filtros opcionales que se mantienen
         sala_id = self.request.query_params.get('sala')
         if sala_id:
             qs = qs.filter(horario__sala_id=sala_id)
@@ -76,11 +79,17 @@ class AsignacionViewSet(viewsets.ModelViewSet):
                     {'error': 'Monitor no encontrado.', 'detail': {'monitor_id': data['monitor']}},
                     status=400,
                 )
-            try:
-                semestre = Semestre.objects.get(pk=data['semestre'])
-            except Semestre.DoesNotExist:
+            # El semestre se infiere automaticamente del semestre activo.
+            # El campo del serializer se conserva opcional pero se ignora.
+            semestre = Semestre.objects.filter(activo=True).first()
+            if not semestre:
                 return Response(
-                    {'error': 'Semestre no encontrado.', 'detail': {'semestre_id': data['semestre']}},
+                    {
+                        'error': 'No hay semestre activo configurado.',
+                        'detail': {
+                            'hint': 'Configura un Semestre con activo=True en la BD antes de crear asignaciones.',
+                        },
+                    },
                     status=400,
                 )
 

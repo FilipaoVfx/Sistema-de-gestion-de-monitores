@@ -2,6 +2,7 @@ from rest_framework import viewsets, permissions
 from rest_framework.response import Response
 
 from asignaciones.models import Asignacion
+from semestres.models import Semestre
 from .models import Horario
 from .serializers import HorarioSerializer
 
@@ -10,12 +11,11 @@ class HorarioViewSet(viewsets.ModelViewSet):
     """Endpoints de Horario.
 
     Query params soportados:
-      ?sala=<id>      filtra por sala
-      ?semestre=<id>  anota cada horario con la Asignacion existente en ese
-                      semestre (campos asignacion_id, monitor_id,
-                      monitor_nombre, monitor_email, ocupado). Util para que
-                      el frontend muestre cuales horarios estan tomados al
-                      asignar un nuevo monitor.
+      ?sala=<id>  filtra por sala
+
+    La ocupacion (monitor_nombre, ocupado, etc.) siempre se anota con el
+    semestre ACTIVO. Si no hay semestre activo, los campos de ocupacion
+    quedan en null/false.
     """
     serializer_class = HorarioSerializer
     permission_classes = [permissions.IsAuthenticated]
@@ -29,6 +29,10 @@ class HorarioViewSet(viewsets.ModelViewSet):
         if sala_id:
             qs = qs.filter(sala_id=sala_id)
         return qs
+
+    def _get_semestre_activo_id(self):
+        sem = Semestre.objects.filter(activo=True).first()
+        return sem.id_semestre if sem else None
 
     def _anotar_ocupacion(self, horarios, semestre_id):
         """Cachea la Asignacion de cada horario para el semestre dado."""
@@ -45,7 +49,8 @@ class HorarioViewSet(viewsets.ModelViewSet):
 
     def list(self, request, *args, **kwargs):
         qs = self.filter_queryset(self.get_queryset())
-        semestre_id = request.query_params.get('semestre')
+        # Siempre anotamos con el semestre activo
+        semestre_id = self._get_semestre_activo_id()
         horarios = list(qs)
         self._anotar_ocupacion(horarios, semestre_id)
 
@@ -56,7 +61,7 @@ class HorarioViewSet(viewsets.ModelViewSet):
 
     def retrieve(self, request, *args, **kwargs):
         instance = self.get_object()
-        semestre_id = request.query_params.get('semestre')
+        semestre_id = self._get_semestre_activo_id()
         if semestre_id:
             asig = Asignacion.objects.select_related('monitor').filter(
                 semestre_id=semestre_id, horario=instance,
