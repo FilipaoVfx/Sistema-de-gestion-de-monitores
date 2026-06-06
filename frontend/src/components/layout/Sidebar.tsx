@@ -61,9 +61,24 @@ export default function Sidebar() {
             <div className="w-8 h-8 rounded-full bg-primary flex items-center justify-center text-white text-xs font-bold">
               {initial}
             </div>
-            <div className="min-w-0">
+            <div className="min-w-0 flex-1">
               <p className="text-white text-xs font-medium truncate">{displayName}</p>
-              <p className="text-white/50 text-xs capitalize">{user.rol || 'Sesión activa'}</p>
+              <div className="flex items-center gap-1.5 mt-0.5">
+                <span
+                  className={[
+                    'text-[10px] font-semibold px-1.5 py-0.5 rounded-full uppercase tracking-wide',
+                    user.rol === 'admin'
+                      ? 'bg-green-500/20 text-green-300'
+                      : 'bg-blue-500/20 text-blue-300',
+                  ].join(' ')}
+                  title={`Rol: ${user.rol || 'desconocido'}`}
+                >
+                  {user.rol || 'sin rol'}
+                </span>
+                <span className="text-white/40 text-[10px] truncate" title={user.email}>
+                  {user.email}
+                </span>
+              </div>
             </div>
           </div>
         )}

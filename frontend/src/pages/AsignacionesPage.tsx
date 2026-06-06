@@ -151,8 +151,37 @@ export default function AsignacionesPage() {
       showToast(`${res.data.creadas} asignación(es) creada(s)`)
       setModalOpen(false)
       load()
-    } catch {
-      showToast('Error al crear asignaciones', 'error')
+    } catch (e: any) {
+      const status = e?.response?.status
+      const data   = e?.response?.data
+      let msg = data?.error || 'Error al crear asignaciones'
+
+      if (status === 403 && data?.detail && typeof data.detail === 'object') {
+        const d = data.detail
+        msg = `${data.error || 'Acceso denegado'} · Sesion: ${d.usuario || '?'} (rol "${d.rol_detectado || '?'}"). ${d.hint || ''}`
+      } else if (data?.detail) {
+        const d = data.detail
+        if (typeof d === 'string') {
+          msg = d
+        } else if (Array.isArray(d)) {
+          msg = d.join(' · ')
+        } else if (typeof d === 'object') {
+          // 500 con type/msg/traceback: mostramos type+msg en toast, traceback en console
+          if (d.type && d.msg) {
+            msg = `${data.error || 'Error'}: ${d.type}: ${d.msg}`
+            console.error('Backend error detail:', d)
+          } else {
+            const parts: string[] = []
+            for (const [field, value] of Object.entries(d)) {
+              if (field === 'traceback') continue
+              const txt = Array.isArray(value) ? value.join(' · ') : String(value)
+              parts.push(`${field}: ${txt}`)
+            }
+            msg = parts.join(' · ') || msg
+          }
+        }
+      }
+      showToast(msg, 'error')
     } finally {
       setSaving(false)
     }
